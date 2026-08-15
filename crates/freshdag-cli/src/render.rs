@@ -30,8 +30,10 @@ use time::OffsetDateTime;
 
 use crate::exit::Exit;
 
-/// Label column width, so the header block lines up.
-const LABEL: usize = 11;
+/// Label column width, so the header block lines up. Wide enough that
+/// the longest label (`Certificate`) is still followed by a separator —
+/// the golden test's normalizer splits on it.
+const LABEL: usize = 13;
 
 /// The sentence a human reads for a reason code.
 ///

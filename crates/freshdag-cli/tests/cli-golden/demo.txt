@@ -1,0 +1,85 @@
+=== valid: nothing changed ===
+$ freshdag check briefs/acme.md --store <TMP>/store
+Artifact     blake3:2222222222222222222222222222222222222222222222222222222222222222
+Path         briefs/acme.md
+Status       valid
+Checked      <CHECKED-AT>
+Recipe       research-account
+Certificate  <CERT-ID>
+
+Reasons: none. A valid certificate carries no reasons.
+
+Dependencies (2):
+  exact      file://<TMP>/work/ICP.md
+  exact      file://<TMP>/work/pricing.md
+
+Observed by:
+  freshdag-adapter-claude 0.1.0 (adapter)
+  freshdag-engine 0.0.0 (probe)
+      known limitation: sees external state only through registered probes
+
+Verdict: valid — every dependency was verified unchanged at exact
+or versioned trust. Safe to reuse. (exit 0)
+[exit 0]
+
+=== stale: a dependency drifted ===
+$ freshdag check briefs/acme.md --store <TMP>/store
+Artifact     blake3:2222222222222222222222222222222222222222222222222222222222222222
+Path         briefs/acme.md
+Status       stale
+Checked      <CHECKED-AT>
+Recipe       research-account
+Certificate  <CERT-ID>
+
+Why (1 reason, in the certificate's contractual order):
+
+  1. drift  —  file://<TMP>/work/pricing.md
+     This dependency changed. A probe re-read it and got a fingerprint
+     that does not match the one recorded when the artifact was built.
+
+Dependencies (2):
+  exact      file://<TMP>/work/ICP.md
+  exact      file://<TMP>/work/pricing.md
+
+Observed by:
+  freshdag-adapter-claude 0.1.0 (adapter)
+  freshdag-engine 0.0.0 (probe)
+      known limitation: sees external state only through registered probes
+
+Verdict: stale — at least one dependency changed since this
+artifact was built. Recompute it. (exit 1)
+[exit 1]
+
+=== unknown: a subprocess nobody observed ===
+$ freshdag check briefs/acme.md --store <TMP>/store
+Artifact     blake3:2222222222222222222222222222222222222222222222222222222222222222
+Path         briefs/acme.md
+Status       unknown
+Checked      <CHECKED-AT>
+Recipe       research-account
+Certificate  <CERT-ID>
+
+Why (1 reason, in the certificate's contractual order):
+
+  1. coverage-deficit  —  (this artifact as a whole)
+     Something happened during this computation that no registered
+     producer claims to observe, so its silence cannot be read as
+     "nothing happened". The usual cause is a `bash` or `task`
+     invocation: only a sub-agent-layer observer can see the files a
+     subprocess reads and writes, and v0 ships no observer backend for
+     macOS. FreshDAG will not call an artifact valid on the strength
+     of effects nobody watched, so this is reported as unknown.
+     context: undischarged-observation-obligation tool_kind=bash
+
+Dependencies (1):
+  exact      file://<TMP>/work/ICP.md
+
+Observed by:
+  freshdag-adapter-claude 0.1.0 (adapter)
+  freshdag-engine 0.0.0 (probe)
+      known limitation: sees external state only through registered probes
+
+Verdict: unknown — FreshDAG could not prove this artifact is
+still valid. Unknown is not fresh: do not reuse it on the
+strength of this check. (exit 2)
+[exit 2]
