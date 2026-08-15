@@ -21,9 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use freshdag_core::artifact::ArtifactId;
 use freshdag_core::computation::ComputationId;
 use freshdag_core::dependency::{DependencyId, TrustClass};
-use freshdag_core::ir::{
-    CoverageManifest, EventKind, EventKindPattern, IrEvent, ProducerRole,
-};
+use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, IrEvent, ProducerRole};
 use freshdag_store::{
     DerivedGraph, ExclusionReason, GraphDefect, SilenceMeaning, Store, DERIVED_FILES,
 };
@@ -544,8 +542,7 @@ fn a_wiped_derived_directory_is_rebuilt_from_the_log_alone() {
     let graph = store.rebuild_derived().expect("build");
 
     // Vandalize the derived directory: stale garbage and a deleted file.
-    std::fs::write(store.derived_dir().join("computations.jsonl"), b"garbage")
-        .expect("vandalize");
+    std::fs::write(store.derived_dir().join("computations.jsonl"), b"garbage").expect("vandalize");
     std::fs::write(store.derived_dir().join("stray.bin"), b"not ours").expect("stray");
 
     // A rebuild replaces the directory wholesale; the stray file is gone.
@@ -572,7 +569,10 @@ fn a_derived_directory_is_a_cache_not_an_authority() {
     // Append one more observation. The derived directory is now stale,
     // and it must say so rather than quietly answering from the cache.
     let extra = read(0x0900, COMP_A, 900, "/repo/late.txt", Some(&h("f1")));
-    store.append(&extra).expect("append");
+    assert_eq!(
+        store.append(&extra).expect("append"),
+        freshdag_store::AppendOutcome::Appended
+    );
     store.sync().expect("sync");
 
     let (_, digest_after) = store.derive_graph().expect("derive");
@@ -605,7 +605,8 @@ fn a_hashed_read_is_an_exact_file_dependency() {
     assert_eq!(main.fingerprint.to_string(), h("a1"));
     assert!(main.is_consistent());
     assert!(
-        deps.iter().all(freshdag_core::dependency::Dependency::is_consistent),
+        deps.iter()
+            .all(freshdag_core::dependency::Dependency::is_consistent),
         "no self-inconsistent dependency may enter the graph"
     );
 }
@@ -638,7 +639,9 @@ fn read_after_own_write_is_internal_state_not_a_dependency() {
     // And it does NOT appear in the reverse index at all: this is a
     // positive finding of "no external dependency here," so widening the
     // blast radius with it would be wrong.
-    assert!(graph.blast_radius(&dep(&format!("file://{BUILD_LOG}"))).is_none());
+    assert!(graph
+        .blast_radius(&dep(&format!("file://{BUILD_LOG}")))
+        .is_none());
 }
 
 #[test]
@@ -866,7 +869,10 @@ fn attribution_names_only_producers_that_actually_emitted() {
     // but emitted nothing for it, so they are NOT attributed to it.
     let e = graph.attribution(&comp(COMP_E)).expect("comp-e coverage");
     assert_eq!(
-        e.entries.iter().map(|c| c.producer.as_str()).collect::<Vec<_>>(),
+        e.entries
+            .iter()
+            .map(|c| c.producer.as_str())
+            .collect::<Vec<_>>(),
         vec![ADAPTER]
     );
 
@@ -944,9 +950,7 @@ fn an_edge_bearing_event_without_a_computation_id_is_reported() {
         .collect();
     assert_eq!(orphans.len(), 1);
     match orphans[0] {
-        GraphDefect::OrphanEdgeEvent {
-            event_id, kind, ..
-        } => {
+        GraphDefect::OrphanEdgeEvent { event_id, kind, .. } => {
             assert_eq!(*event_id, uuid(0x0600));
             assert_eq!(*kind, EventKind::FsRead);
         }
