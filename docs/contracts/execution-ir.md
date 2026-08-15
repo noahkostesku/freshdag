@@ -126,7 +126,15 @@ observed path may be included as `raw_path`.
 
 ### External-state artifacts (probe-emitted)
 
-- `probe.checked` — `{ scheme, key, observed_fingerprint, trust_class, result: "match"|"drift"|"unknown" }`
+- `probe.checked` — `{ scheme, key, observed_fingerprint, trust_class, result: "match"|"drift"|"unknown", retryable? }`
+
+`retryable` is REQUIRED when `result` is `"unknown"` and MUST be absent
+otherwise. It is the append-only record of `ProbeResult::Unknown {
+retryable }`, which the certificate deliberately does not carry
+(certificates explain; the log schedules). Without it, the certificate
+would depend on evidence not reconstructable from the canonical log,
+straining invariant #5. This field is additive to an existing kind and
+therefore does not bump `schemas/execution-ir/`.
 
 ### Artifact production
 

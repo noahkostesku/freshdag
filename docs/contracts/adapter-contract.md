@@ -37,6 +37,7 @@ An adapter MUST:
    {
      "adapter": "freshdag-adapter-claude",
      "version": "0.1.0",
+     "role": "adapter",
      "emits": ["session.*", "computation.*", "tool.*", "fs.read", "fs.write"],
      "partial": {
        "fs.read":  "only from Read tool; subprocess reads via observer",

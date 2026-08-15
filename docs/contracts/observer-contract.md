@@ -27,6 +27,7 @@ Every observer publishes:
 {
   "observer": "freshdag-observer-fsatrace",
   "version": "0.1.0",
+  "role": "observer",
   "platforms": ["linux-x86_64", "linux-arm64"],
   "capabilities": {
     "fs.read":  true,

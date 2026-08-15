@@ -81,6 +81,13 @@ governed by these rules:
   NOT silently fall through to a lower-trust probe for the same
   scheme.
 
+**Certificate consequences.** Explicit demotion surfaces as
+`ReasonCode::ProbeTrustDemoted`. Probe removal, registration failure,
+arbitration ties, and "no probe registered for this scheme" all surface
+as `ReasonCode::NoProbeAvailable`. Neither is `ProbeUnknown`, which
+asserts that a probe ran and could not decide — a materially different
+statement to a user reading `freshdag why`.
+
 The purpose is to prevent flap between two probes handling the same
 scheme (e.g., a generic HTTPS probe and a GitHub-specific probe)
 producing thrashing trust classes on the same dependency.
@@ -102,6 +109,19 @@ probe.
 Silent "the endpoint didn't respond, so I'll say fresh" behavior is a
 correctness bug that violates invariant #7. Enforce this in code
 review.
+
+**Mapping to certificate reason codes.** `ProbeResult::Unknown { reason,
+retryable }` maps to `ReasonCode::ProbeUnknown` on the certificate, and
+the probe's `reason` string becomes that reason's non-normative
+`detail` — never its code. Probes do not choose reason codes and MUST
+NOT emit code-like strings. The string MUST satisfy the determinism and
+secrecy rules in `docs/contracts/certificate-contract.md §The detail
+field`: no elapsed times, no credentials, no response bodies.
+
+`retryable` does NOT appear on the certificate. Probes MUST record it in
+the `probe.checked` payload so it survives in the append-only log
+(invariant #5), where the engine and `freshdag watch` consume it.
+Certificates explain; the log schedules.
 
 ## Registration
 
