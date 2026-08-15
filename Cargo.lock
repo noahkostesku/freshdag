@@ -359,7 +359,11 @@ dependencies = [
  "clap",
  "freshdag-core",
  "freshdag-engine",
+ "freshdag-probes",
  "freshdag-store",
+ "serde_json",
+ "time",
+ "uuid",
 ]
 
 [[package]]

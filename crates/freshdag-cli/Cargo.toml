@@ -17,5 +17,11 @@ workspace = true
 [dependencies]
 freshdag-core.workspace = true
 freshdag-engine.workspace = true
+freshdag-probes.workspace = true
 freshdag-store.workspace = true
 clap.workspace = true
+serde_json.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
