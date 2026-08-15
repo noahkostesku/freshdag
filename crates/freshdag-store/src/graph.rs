@@ -38,9 +38,9 @@
 //!
 //! ## Read-after-own-write
 //!
-//! A read of a path the same computation previously wrote — *previously*
-//! in the canonical linearization from `docs/contracts/execution-ir.md
-//! §Ordering* — is internal state, not an external dependency. It is
+//! A read of a path the same computation previously wrote — *previously
+//! in the canonical linearization* from `docs/contracts/execution-ir.md`
+//! §Ordering — is internal state, not an external dependency. It is
 //! excluded. A read that happens *before* the first write to that path
 //! (read-modify-write) **is** an external dependency and is kept. This
 //! is precisely why the derivation must run over `linearize`d events and
@@ -363,7 +363,11 @@ pub struct Accounting {
 impl Accounting {
     /// Does every event fall into exactly one bucket?
     pub fn is_balanced(&self) -> bool {
-        self.edge_events + self.outputs + self.artifacts + self.obligations + self.excluded
+        self.edge_events
+            + self.outputs
+            + self.artifacts
+            + self.obligations
+            + self.excluded
             + self.unmodeled
             == self.total
     }
@@ -496,10 +500,7 @@ impl DerivedGraph {
     /// The iterator may be in any order; it is canonically linearized
     /// first. `coverage` supplies the producer manifests used for
     /// attribution and for silence interpretation.
-    pub fn replay(
-        events: impl IntoIterator<Item = IrEvent>,
-        coverage: &CoverageRegistry,
-    ) -> Self {
+    pub fn replay(events: impl IntoIterator<Item = IrEvent>, coverage: &CoverageRegistry) -> Self {
         let linearization = linearize_checked(events.into_iter());
         let deterministic = linearization.is_deterministic();
         let duplicates: Vec<DuplicateEventId> = linearization.duplicate_event_ids().to_vec();
@@ -769,6 +770,13 @@ impl DerivedGraph {
                     .insert(node.computation_id.clone());
             }
             for excluded in &node.excluded {
+                // Only kinds that could have *been* a dependency count.
+                // A malformed `fs.write` is an unreadable output, not an
+                // unproven dependency; putting it in the reverse index
+                // would invent an inbound edge that never existed.
+                if !matches!(excluded.kind, EventKind::FsRead | EventKind::ProbeChecked) {
+                    continue;
+                }
                 if !excluded.reason.is_unproven_dependency() {
                     continue;
                 }
@@ -877,12 +885,11 @@ fn producing_artifact(
 ) -> Option<ArtifactId> {
     artifacts
         .iter()
-        .filter(|a| {
+        .rfind(|a| {
             a.position < position
                 && a.path.as_path() == path
                 && a.computation.as_deref() != Some(&comp.0)
         })
-        .next_back()
         .map(|a| a.artifact.clone())
 }
 
@@ -985,36 +992,33 @@ fn classify_read(
 }
 
 fn classify_write(event: &IrEvent, written: &mut BTreeSet<PathBuf>) -> Outcome {
-    match event.decode_payload() {
-        Ok(TypedPayload::FsWrite(w)) => {
-            written.insert(w.path.clone());
-            Outcome::Output(OutputRecord {
-                event_id: event.event_id,
-                path: w.path,
-                hash: w.hash.map(|h| h.to_string()),
-            })
-        }
-        _ => {
-            // A write we cannot decode still tells us the computation
-            // wrote *something*; record the path if it is recoverable so
-            // read-after-own-write does not silently regress.
-            if let Some(path) = event.payload.get("path").and_then(|v| v.as_str()) {
-                written.insert(PathBuf::from(path));
-            }
-            Outcome::Excluded(ExcludedEdge {
-                event_id: event.event_id,
-                kind: event.kind,
-                key: event
-                    .payload
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .map(|p| format!("file://{p}")),
-                reason: ExclusionReason::MalformedPayload(
-                    "fs.write payload did not decode as FsWrite".to_string(),
-                ),
-            })
-        }
+    if let Ok(TypedPayload::FsWrite(w)) = event.decode_payload() {
+        written.insert(w.path.clone());
+        return Outcome::Output(OutputRecord {
+            event_id: event.event_id,
+            path: w.path,
+            hash: w.hash.map(|h| h.to_string()),
+        });
     }
+    // A write we cannot decode still tells us the computation wrote
+    // *something*; record the path if it is recoverable so
+    // read-after-own-write does not silently regress into "this looks
+    // like an external dependency."
+    let raw_path = event
+        .payload
+        .get("path")
+        .and_then(serde_json::Value::as_str);
+    if let Some(path) = raw_path {
+        written.insert(PathBuf::from(path));
+    }
+    Outcome::Excluded(ExcludedEdge {
+        event_id: event.event_id,
+        kind: event.kind,
+        key: raw_path.map(|p| format!("file://{p}")),
+        reason: ExclusionReason::MalformedPayload(
+            "fs.write payload did not decode as FsWrite".to_string(),
+        ),
+    })
 }
 
 fn classify_probe(event: &IrEvent) -> Outcome {
@@ -1075,7 +1079,10 @@ fn classify_probe(event: &IrEvent) -> Outcome {
         }
     };
 
-    let ttl_seconds = event.payload.get("ttl_seconds").and_then(|v| v.as_u64());
+    let ttl_seconds = event
+        .payload
+        .get("ttl_seconds")
+        .and_then(serde_json::Value::as_u64);
     if matches!(trust_class, TrustClass::Volatile) && ttl_seconds.is_none() {
         return Outcome::Excluded(ExcludedEdge {
             event_id: event.event_id,

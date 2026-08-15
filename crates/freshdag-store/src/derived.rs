@@ -122,7 +122,10 @@ impl DerivedGraph {
     /// This is the single serialization path. Two graphs are equal on
     /// disk iff these maps are equal, which is what the reconstruction
     /// test asserts.
-    pub fn to_files(&self, source_digest: &str) -> Result<BTreeMap<&'static str, Vec<u8>>, StoreError> {
+    pub fn to_files(
+        &self,
+        source_digest: &str,
+    ) -> Result<BTreeMap<&'static str, Vec<u8>>, StoreError> {
         let manifest = DerivedManifest {
             format: DERIVED_FORMAT.to_string(),
             source_digest: source_digest.to_string(),
@@ -232,9 +235,7 @@ pub fn drop_derived(dir: &Path) -> Result<(), StoreError> {
     }
 }
 
-fn jsonl<'a, T: Serialize + 'a>(
-    items: impl Iterator<Item = &'a T>,
-) -> Result<Vec<u8>, StoreError> {
+fn jsonl<'a, T: Serialize + 'a>(items: impl Iterator<Item = &'a T>) -> Result<Vec<u8>, StoreError> {
     let mut out = Vec::new();
     for item in items {
         out.extend_from_slice(&serde_json::to_vec(item).map_err(StoreError::Serialize)?);
