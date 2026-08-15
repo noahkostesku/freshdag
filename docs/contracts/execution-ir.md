@@ -75,11 +75,32 @@ adapters may treat each turn or sub-goal as a computation.
 
 ### Tool interaction
 
-- `tool.invoked` — `{ tool_name, tool_kind: "builtin"|"mcp"|"skill"|"task", tool_input, cwd }`
+- `tool.invoked` — `{ tool_name, tool_kind: "builtin"|"mcp"|"skill"|"task"|"bash", tool_input, cwd }`
 - `tool.completed` — `{ tool_output, is_error, duration_ms }`
 
 Naming convention: MCP tools use `mcp/<server>/<tool>`. Skills use
-`skill/<name>`. Bash subprocesses use `bash`.
+`skill/<name>`. Bash subprocesses use `bash` (with `tool_kind = "bash"`).
+
+`bash` is a distinct `tool_kind` — not a `tool_name` under `builtin` —
+because the coverage-deficit rule in `docs/contracts/certificate-contract.md`
+treats `bash|task` as invocations whose I/O the adapter cannot fully
+see. The engine uses the `tool_kind` to decide whether an observer
+producer must be present in `observation_coverage` before a
+computation's status may become `valid`. `task` is likewise distinct:
+subagent invocations expose only their prompt and final text to the
+parent, so they carry an observation-coverage obligation.
+
+### Diagnostic
+
+- `diagnostic` — `{ message: string, ...producer-defined fields }`
+
+Producers emit `diagnostic` when they encounter a runtime event they
+cannot classify (see `docs/contracts/adapter-contract.md
+§Responsibilities #5`), when back-pressure forces them to drop the
+newest events (`§Errors and Backpressure`), or when a probe declares
+`probe.trust_demoted` (`docs/contracts/probe-contract.md §Anti-thrash
+Protocol`). Silence is a bug; diagnostics are how producers surface
+it.
 
 ### Filesystem effects (adapter- or observer-emitted)
 
