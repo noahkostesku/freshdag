@@ -1,0 +1,49 @@
+name: Contract change proposal
+description: Propose a change to a contract in docs/contracts/ or the corresponding freshdag-core types.
+labels: ["contract-change"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Contract changes go through the process in
+        `.claude/rules/architecture.md`. Fill out every section — this
+        template exists so ambiguity does not survive to code review.
+  - type: input
+    id: contract
+    attributes:
+      label: Contract or type to change
+      placeholder: docs/contracts/execution-ir.md, freshdag-core::dependency::Fingerprint, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is the existing contract insufficient?
+    validations:
+      required: true
+  - type: textarea
+    id: affected
+    attributes:
+      label: Who is affected?
+      description: List crates and agents.
+    validations:
+      required: true
+  - type: textarea
+    id: migration
+    attributes:
+      label: Migration required for downstream consumers
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests affected or added
+    validations:
+      required: true
+  - type: textarea
+    id: novelty
+    attributes:
+      label: Novelty implications
+      description: Does this expand our public surface? Which NOVELTY.md row governs it?
+    validations:
+      required: true

@@ -1,0 +1,40 @@
+# FreshDAG code ownership. See docs/OWNERSHIP.md for the human-readable
+# version, agent charters in .claude/agents/, and the contract-change
+# policy in .claude/rules/architecture.md.
+#
+# GitHub CODEOWNERS applies to human review; agent responsibilities are
+# governed by .claude/agents/. Both should agree.
+
+# Default: architect reviews anything not otherwise claimed.
+*                                       @noahkostesku
+
+# Crates — each crate owned by its subsystem engineer (currently all
+# route to @noahkostesku until humans join; agent charters are the
+# authoritative attribution).
+/crates/freshdag-core/                  @noahkostesku
+/crates/freshdag-store/                 @noahkostesku
+/crates/freshdag-engine/                @noahkostesku
+/crates/freshdag-cli/                   @noahkostesku
+/crates/freshdag-adapter-claude/        @noahkostesku
+/crates/freshdag-observer/              @noahkostesku
+/crates/freshdag-probes/                @noahkostesku
+
+# Contracts require architect sign-off in addition to their owner.
+/docs/contracts/                        @noahkostesku
+/schemas/                               @noahkostesku
+
+# Constitution + invariants.
+/CLAUDE.md                              @noahkostesku
+/ARCHITECTURE.md                        @noahkostesku
+/README.md                              @noahkostesku
+/docs/NOVELTY.md                        @noahkostesku
+/docs/BUILD_PLAN.md                     @noahkostesku
+/docs/OWNERSHIP.md                      @noahkostesku
+/docs/adr/                              @noahkostesku
+
+# Claude Code project configuration.
+/.claude/                               @noahkostesku
+
+# Fixtures and eval.
+/fixtures/                              @noahkostesku
+/docs/EVALUATION.md                     @noahkostesku

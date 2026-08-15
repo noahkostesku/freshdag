@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the architecture first
+    url: https://github.com/noahkostesku/freshdag/blob/main/ARCHITECTURE.md
+    about: Please read ARCHITECTURE.md and docs/NOVELTY.md before filing.

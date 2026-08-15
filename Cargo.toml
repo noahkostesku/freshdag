@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/freshdag-core",
+    "crates/freshdag-store",
+    "crates/freshdag-engine",
+    "crates/freshdag-cli",
+    "crates/freshdag-adapter-claude",
+    "crates/freshdag-observer",
+    "crates/freshdag-probes",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/noahkostesku/freshdag"
+authors = ["FreshDAG contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+sha2 = "0.10"
+blake3 = "1"
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+clap = { version = "4", features = ["derive"] }
+
+freshdag-core = { path = "crates/freshdag-core", version = "0.0.0" }
+freshdag-store = { path = "crates/freshdag-store", version = "0.0.0" }
+freshdag-engine = { path = "crates/freshdag-engine", version = "0.0.0" }
+freshdag-adapter-claude = { path = "crates/freshdag-adapter-claude", version = "0.0.0" }
+freshdag-observer = { path = "crates/freshdag-observer", version = "0.0.0" }
+freshdag-probes = { path = "crates/freshdag-probes", version = "0.0.0" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

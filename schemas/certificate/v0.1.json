@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freshdag.dev/schemas/certificate/v0.1.json",
+  "title": "FreshDAG Validity Certificate",
+  "description": "See docs/contracts/certificate-contract.md",
+  "type": "object",
+  "required": ["cert_id", "schema", "artifact", "produced_by", "depends_on", "status", "observation_coverage"],
+  "properties": {
+    "cert_id":   { "type": "string", "pattern": "^blake3:[0-9a-f]{64}$" },
+    "schema":    { "const": "freshdag.certificate/v0.1" },
+    "artifact": {
+      "type": "object",
+      "required": ["id", "kind", "content_hash", "size"],
+      "properties": {
+        "id":           { "type": "string" },
+        "path":         { "type": "string" },
+        "kind":         { "type": "string" },
+        "content_hash": { "type": "string" },
+        "size":         { "type": "integer", "minimum": 0 }
+      }
+    },
+    "produced_by": {
+      "type": "object",
+      "required": ["computation_id", "adapter", "started", "ended"],
+      "properties": {
+        "computation_id": { "type": "string" },
+        "recipe":         { "type": ["string", "null"] },
+        "recipe_hash":    { "type": ["string", "null"] },
+        "adapter":        { "type": "string" },
+        "started":        { "type": "string", "format": "date-time" },
+        "ended":          { "type": "string", "format": "date-time" }
+      }
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "scheme", "trust_class", "fingerprint", "observed_at"],
+        "properties": {
+          "key":         { "type": "string" },
+          "scheme":      { "type": "string" },
+          "trust_class": { "enum": ["exact", "versioned", "heuristic", "volatile"] },
+          "fingerprint": { "type": "string" },
+          "observed_at": { "type": "string", "format": "date-time" },
+          "produced_by": { "type": ["string", "null"] },
+          "ttl_seconds": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "comparator": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":   { "type": "string" },
+        "config": { "type": "object" }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": ["value", "checked"],
+      "properties": {
+        "value":   { "enum": ["valid", "likely-valid", "stale", "unknown"] },
+        "checked": { "type": "string", "format": "date-time" },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["dependency_key", "reason"],
+            "properties": {
+              "dependency_key": { "type": "string" },
+              "reason":         { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "observation_coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["producer", "version"],
+        "properties": {
+          "producer":            { "type": "string" },
+          "version":             { "type": "string" },
+          "known_limitations":   { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "Invariant #7: status.value cannot be 'valid' when any dependency's trust_class is 'heuristic' or 'volatile'. The strongest achievable status in those cases is 'likely-valid'.",
+      "if": {
+        "properties": {
+          "depends_on": {
+            "type": "array",
+            "contains": {
+              "properties": { "trust_class": { "enum": ["heuristic", "volatile"] } },
+              "required": ["trust_class"]
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": { "status": { "properties": { "value": { "not": { "const": "valid" } } } } }
+      }
+    },
+    {
+      "description": "Invariant #9: recipe_hash must be present when status.value is 'valid' or 'likely-valid'.",
+      "if": {
+        "properties": { "status": { "properties": { "value": { "enum": ["valid", "likely-valid"] } } } }
+      },
+      "then": {
+        "properties": {
+          "produced_by": {
+            "properties": { "recipe_hash": { "type": "string" } },
+            "required": ["recipe_hash"]
+          }
+        }
+      }
+    },
+    {
+      "description": "Invariant #6: status.reasons must be populated when status.value is not 'valid'.",
+      "if": {
+        "properties": { "status": { "properties": { "value": { "not": { "const": "valid" } } } } }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "properties": { "reasons": { "type": "array", "minItems": 1 } },
+            "required": ["reasons"]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+[package]
+name = "freshdag-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "freshdag command-line interface."
+
+[[bin]]
+name = "freshdag"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+freshdag-core.workspace = true
+freshdag-engine.workspace = true
+freshdag-store.workspace = true
+clap.workspace = true

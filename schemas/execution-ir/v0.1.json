@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freshdag.dev/schemas/execution-ir/v0.1.json",
+  "title": "FreshDAG Canonical Execution IR Event",
+  "description": "See docs/contracts/execution-ir.md",
+  "type": "object",
+  "required": ["event_id", "producer", "producer_version", "session_id", "ts", "kind", "payload"],
+  "properties": {
+    "event_id":         { "type": "string", "format": "uuid" },
+    "producer":         { "type": "string" },
+    "producer_version": { "type": "string" },
+    "session_id":       { "type": "string" },
+    "computation_id":   { "type": ["string", "null"] },
+    "parent_id":        { "type": ["string", "null"], "format": "uuid" },
+    "causal_inputs":    { "type": ["array", "null"], "items": { "type": "string", "format": "uuid" } },
+    "ts":               { "type": "string", "format": "date-time" },
+    "kind": {
+      "enum": [
+        "session.started", "session.ended",
+        "computation.started", "computation.ended",
+        "tool.invoked", "tool.completed",
+        "fs.read", "fs.write", "fs.stat", "fs.rename", "fs.unlink", "fs.dirlist",
+        "proc.spawn", "proc.exit",
+        "net.connect", "net.fetch",
+        "probe.checked",
+        "artifact.produced",
+        "diagnostic"
+      ]
+    },
+    "payload": { "type": "object" }
+  }
+}

@@ -1,0 +1,20 @@
+[package]
+name = "freshdag-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "FreshDAG core domain model: dependencies, fingerprints, validity, artifacts, computations. No runtime, no I/O."
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+blake3.workspace = true
+time.workspace = true

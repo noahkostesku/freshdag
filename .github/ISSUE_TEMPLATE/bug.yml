@@ -1,0 +1,51 @@
+name: Bug report
+description: Something FreshDAG does that it shouldn't, or something correct it says incorrectly.
+labels: ["kind/bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: check that the behavior isn't governed by an
+        architectural invariant. If you're proposing to relax an
+        invariant, file a `kind/experiment` issue instead so we can
+        route it via ADR.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Actual behavior, with commands or code that reproduce it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What FreshDAG should have done, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust version, `freshdag --version`, adapter and observer versions if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: certificate
+    attributes:
+      label: Relevant certificate (if any)
+      description: Paste the `.freshdag/*.cert.json` for the affected artifact if applicable.
+      render: json
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Correctness severity
+      description: Missed-staleness (FreshDAG said `valid` when it wasn't) is the highest severity.
+      options:
+        - "missed-staleness (produced `valid` on stale artifact)"
+        - "over-staleness (produced `stale` on valid artifact)"
+        - "wrong reason (correct verdict, wrong explanation)"
+        - "crash / diagnostic"
+        - "documentation / usability"
+    validations:
+      required: true

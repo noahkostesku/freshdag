@@ -1,0 +1,17 @@
+[package]
+name = "freshdag-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Append-only observation log and derived graph state storage for FreshDAG."
+
+[lints]
+workspace = true
+
+[dependencies]
+freshdag-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

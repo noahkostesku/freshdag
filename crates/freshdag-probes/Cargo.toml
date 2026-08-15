@@ -1,0 +1,15 @@
+[package]
+name = "freshdag-probes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "External-state probes: cheap freshness checks (ETag, HEAD, versioned APIs, mtime, etc.) for dependencies FreshDAG can only observe from outside."
+
+[lints]
+workspace = true
+
+[dependencies]
+freshdag-core.workspace = true
+thiserror.workspace = true

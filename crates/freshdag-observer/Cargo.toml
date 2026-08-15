@@ -1,0 +1,15 @@
+[package]
+name = "freshdag-observer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Systems-level observers (filesystem, subprocess, network) that emit into FreshDAG's canonical IR."
+
+[lints]
+workspace = true
+
+[dependencies]
+freshdag-core.workspace = true
+thiserror.workspace = true

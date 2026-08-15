@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a new capability, adapter, observer, probe, or comparator.
+labels: ["kind/feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: read `docs/NOVELTY.md`. If your proposal overlaps
+        with a firewalled area (§3) or an adjacent-territory area (§4),
+        make the case for why FreshDAG can adopt it without becoming the
+        adjacent system.
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What agent workflow is broken today, and how does the current design fail it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Concrete shape. If adapter/observer/probe/comparator, cite the contract.
+    validations:
+      required: true
+  - type: textarea
+    id: novelty
+    attributes:
+      label: Novelty check
+      description: Which row in `docs/NOVELTY.md §1` is nearest? Why is this proposal not that?
+    validations:
+      required: true
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariant impact
+      description: Which of the 16 invariants does this touch? Any require relaxation? (If yes, this is an ADR proposal, not a feature request.)
+    validations:
+      required: true
