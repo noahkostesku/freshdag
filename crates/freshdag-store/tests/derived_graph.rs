@@ -1051,3 +1051,23 @@ fn a_damaged_derived_directory_is_an_error_not_an_empty_graph() {
         "a damaged derived directory must not read as 'no derived state'"
     );
 }
+
+/// Not an assertion — a documentation harness. `cargo test -p
+/// freshdag-store --test derived_graph -- --ignored --nocapture
+/// dump_derived_layout` prints the exact on-disk shape, which is the
+/// artifact a reviewer needs to judge whether a core type change would
+/// force a rewrite.
+#[test]
+#[ignore = "documentation harness; prints the derived layout"]
+fn dump_derived_layout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = seeded_store(dir.path(), 0x5EED_0000_0000_0001);
+    store.rebuild_derived().expect("build");
+    for name in DERIVED_FILES {
+        let raw = std::fs::read_to_string(store.derived_dir().join(name)).expect("read");
+        println!("===== {name} =====");
+        for line in raw.lines() {
+            println!("{line}");
+        }
+    }
+}
