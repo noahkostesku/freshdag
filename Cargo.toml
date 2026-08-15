@@ -41,6 +41,14 @@ blake3 = "1"
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 clap = { version = "4", features = ["derive"] }
+# HTTP client for the `https://` freshness probe. `blocking` keeps the
+# `Probe` trait synchronous; `rustls-tls` avoids a system OpenSSL in CI.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
+# Dev-only: in-process HTTP server for probe tests (no outbound network).
+httptest = "0.16"
 
 freshdag-core = { path = "crates/freshdag-core", version = "0.0.0" }
 freshdag-store = { path = "crates/freshdag-store", version = "0.0.0" }
