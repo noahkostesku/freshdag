@@ -1,0 +1,28 @@
+{
+  "cert_id": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+  "schema": "freshdag.certificate/v0.1",
+  "artifact": {
+    "id": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "kind": "text/markdown",
+    "content_hash": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size": 100
+  },
+  "produced_by": {
+    "computation_id": "comp:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "recipe_hash": "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "adapter": "freshdag-adapter-claude/0.1.0",
+    "started": "2026-08-15T13:45:12.001Z",
+    "ended": "2026-08-15T13:46:07.892Z"
+  },
+  "depends_on": [
+    {
+      "key": "file:///abs/path/x",
+      "scheme": "file",
+      "trust_class": "exact",
+      "fingerprint": "blake3:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "observed_at": "2026-08-15T13:45:14.220Z"
+    }
+  ],
+  "status": { "value": "valid", "checked": "2026-08-15T13:46:08.001Z" },
+  "observation_coverage": []
+}

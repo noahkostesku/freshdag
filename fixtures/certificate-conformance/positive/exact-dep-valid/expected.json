@@ -1,0 +1,4 @@
+{
+  "invariant_check": "pass",
+  "reason": "all deps are exact; recipe_hash present; coverage non-empty"
+}

@@ -1,0 +1,4 @@
+{
+  "invariant_check": "fail",
+  "reason": "NakedVolatile"
+}

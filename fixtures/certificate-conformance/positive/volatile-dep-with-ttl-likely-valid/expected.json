@@ -1,0 +1,4 @@
+{
+  "invariant_check": "pass",
+  "reason": "volatile dep with TTL and populated reasons is a legal likely-valid"
+}

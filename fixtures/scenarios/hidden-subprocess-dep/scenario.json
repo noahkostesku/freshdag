@@ -1,0 +1,64 @@
+{
+  "scenario": "hidden-subprocess-dep",
+  "schema": "freshdag.scenario/v0.1",
+  "description": "The agent shells out to `python script.py`, which reads config.json. The adapter alone cannot see the config.json read — only the observer (fsatrace on Linux) surfaces it. When observer coverage is absent, the certificate MUST be at most `unknown` (coverage-deficit rule).",
+  "input_observations": [
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000020",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-hidden",
+      "ts": "2026-08-15T13:45:14.220000000Z",
+      "kind": "tool.invoked",
+      "payload": {
+        "tool_name": "bash",
+        "tool_kind": "bash",
+        "tool_input": { "command": "python script.py" },
+        "cwd": "/repo"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000021",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-hidden",
+      "ts": "2026-08-15T13:45:15.100000000Z",
+      "kind": "tool.completed",
+      "payload": { "tool_output": {}, "is_error": false, "duration_ms": 250 }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000022",
+      "producer": "freshdag-observer-fsatrace",
+      "producer_version": "0.1.0",
+      "session_id": "sess-hidden",
+      "ts": "2026-08-15T13:45:14.500000000Z",
+      "kind": "fs.read",
+      "payload": {
+        "path": "/repo/config.json",
+        "size": 256,
+        "raw_path": "config.json",
+        "read_kind": "direct",
+        "impure": false
+      }
+    }
+  ],
+  "expected": {
+    "dependency_graph": [
+      {
+        "dependency_key": "file:///repo/config.json",
+        "scheme": "file",
+        "trust_class": "exact"
+      }
+    ],
+    "certificate_status": { "value": "valid" },
+    "invalidation": {
+      "before_mutation": "valid",
+      "after_mutation": "stale",
+      "mutated_dependency_keys": ["file:///repo/config.json"]
+    }
+  },
+  "notes": [
+    "fixture 5 in docs/EVALUATION.md §2",
+    "when the observer is absent (macOS or stub), engine MUST cap status at unknown per certificate-contract §Coverage-Deficit"
+  ]
+}

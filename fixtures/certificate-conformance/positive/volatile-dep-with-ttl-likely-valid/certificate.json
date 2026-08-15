@@ -1,0 +1,43 @@
+{
+  "cert_id": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+  "schema": "freshdag.certificate/v0.1",
+  "artifact": {
+    "id": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "briefs/acme.md",
+    "kind": "text/markdown",
+    "content_hash": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size": 4213
+  },
+  "produced_by": {
+    "computation_id": "comp:4444444444444444444444444444444444444444444444444444444444444444",
+    "recipe": "research-account",
+    "recipe_hash": "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "adapter": "freshdag-adapter-claude/0.1.0",
+    "started": "2026-08-15T13:45:12.001Z",
+    "ended": "2026-08-15T13:46:07.892Z"
+  },
+  "depends_on": [
+    {
+      "key": "web.search://q=acme pricing changes 2026",
+      "scheme": "web.search",
+      "trust_class": "volatile",
+      "fingerprint": "custom:blake3-of-results",
+      "observed_at": "2026-08-15T13:45:22.812Z",
+      "ttl_seconds": 3600
+    }
+  ],
+  "comparator": { "name": "exact" },
+  "status": {
+    "value": "likely-valid",
+    "checked": "2026-08-15T13:46:08.001Z",
+    "reasons": [
+      {
+        "dependency_key": "web.search://q=acme pricing changes 2026",
+        "reason": "trust_class_volatile_caps_at_likely_valid"
+      }
+    ]
+  },
+  "observation_coverage": [
+    { "producer": "freshdag-adapter-claude", "version": "0.1.0" }
+  ]
+}

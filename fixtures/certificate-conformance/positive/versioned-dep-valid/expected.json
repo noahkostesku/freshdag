@@ -1,0 +1,4 @@
+{
+  "invariant_check": "pass",
+  "reason": "versioned deps are valid when the version token matches"
+}

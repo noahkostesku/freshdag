@@ -1,0 +1,52 @@
+{
+  "scenario": "volatile-external-dep",
+  "schema": "freshdag.scenario/v0.1",
+  "description": "The recipe calls web.search — a source with no trustworthy freshness signal. Certificate status is capped at likely-valid within TTL and unknown after TTL expires. It MUST never be valid.",
+  "input_observations": [
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000040",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile",
+      "ts": "2026-08-15T13:45:14.220000000Z",
+      "kind": "tool.invoked",
+      "payload": {
+        "tool_name": "web.search",
+        "tool_kind": "builtin",
+        "tool_input": { "q": "acme pricing changes 2026" },
+        "cwd": "/repo"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000041",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile",
+      "ts": "2026-08-15T13:45:15.100000000Z",
+      "kind": "tool.completed",
+      "payload": { "tool_output": {}, "is_error": false, "duration_ms": 800 }
+    }
+  ],
+  "expected": {
+    "dependency_graph": [
+      {
+        "dependency_key": "web.search://q=acme pricing changes 2026",
+        "scheme": "web.search",
+        "trust_class": "volatile"
+      }
+    ],
+    "certificate_status": {
+      "value": "likely-valid",
+      "reason_codes": ["trust_class_volatile_caps_at_likely_valid"]
+    },
+    "invalidation": {
+      "before_mutation": "likely-valid",
+      "after_mutation": "unknown",
+      "mutated_dependency_keys": []
+    }
+  },
+  "notes": [
+    "fixture 7 in docs/EVALUATION.md §2",
+    "after_mutation=unknown models the TTL-expiry case; no world mutation required"
+  ]
+}

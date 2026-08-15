@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freshdag.dev/schemas/scenario/v0.1.json",
+  "title": "FreshDAG Evaluation Scenario",
+  "description": "A deterministic scenario that drives Wave-2 engine tests. See docs/EVALUATION.md and fixtures/scenarios/README.md. W5 (eval harness skeleton) ships scenario definitions and a well-formedness test; the engine's ability to actually execute them lands with W3/W4.",
+  "type": "object",
+  "required": ["scenario", "schema", "description", "input_observations", "expected"],
+  "properties": {
+    "scenario": { "type": "string" },
+    "schema": { "const": "freshdag.scenario/v0.1" },
+    "description": { "type": "string" },
+    "input_observations": {
+      "description": "List of canonical IR events the adapter/observer would emit for this scenario. See schemas/execution-ir/v0.1.json.",
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "input_probes": {
+      "description": "Optional: pre-scripted probe results the engine will consume during check. Keyed by dependency_key.",
+      "type": "object",
+      "additionalProperties": { "type": "object" }
+    },
+    "expected": {
+      "type": "object",
+      "required": ["dependency_graph", "certificate_status"],
+      "properties": {
+        "dependency_graph": {
+          "description": "The set of dependency edges the engine should materialize.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["dependency_key", "scheme", "trust_class"],
+            "properties": {
+              "dependency_key": { "type": "string" },
+              "scheme": { "type": "string" },
+              "trust_class": { "enum": ["exact", "versioned", "heuristic", "volatile"] }
+            }
+          }
+        },
+        "certificate_status": {
+          "description": "The status the engine's aggregation should produce.",
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "value": { "enum": ["valid", "likely-valid", "stale", "unknown"] },
+            "reason_codes": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "invalidation": {
+          "description": "For scenarios that mutate the world after the initial run.",
+          "type": "object",
+          "properties": {
+            "before_mutation": { "enum": ["valid", "likely-valid", "stale", "unknown"] },
+            "after_mutation": { "enum": ["valid", "likely-valid", "stale", "unknown"] },
+            "mutated_dependency_keys": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

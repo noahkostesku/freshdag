@@ -54,12 +54,12 @@ pub enum ProbeResult {
 /// pool by the engine.
 pub trait Probe: Send + Sync {
     /// The scheme this probe handles (`file`, `https`, `attio`, `mcp`,
-    /// `postgres`, ...).
-    fn scheme(&self) -> &str;
+    /// `postgres`, ...). Compile-time constant per implementation.
+    fn scheme(&self) -> &'static str;
 
     /// Optional host pattern for arbitration among multiple probes
     /// handling the same scheme (see probe-contract §Probe Arbitration).
-    fn host_pattern(&self) -> Option<&str> {
+    fn host_pattern(&self) -> Option<&'static str> {
         None
     }
 

@@ -1,0 +1,45 @@
+{
+  "scenario": "coverage-deficit",
+  "schema": "freshdag.scenario/v0.1",
+  "description": "The adapter reports a bash tool.invoked but no observer is present in observation_coverage. Per certificate-contract §Coverage-Deficit, the engine MUST cap status at unknown even though every declared dependency is exact and matches.",
+  "input_observations": [
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000050",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-coverage-deficit",
+      "ts": "2026-08-15T13:45:14.220000000Z",
+      "kind": "tool.invoked",
+      "payload": {
+        "tool_name": "bash",
+        "tool_kind": "bash",
+        "tool_input": { "command": "cat notes.md" },
+        "cwd": "/repo"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000051",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-coverage-deficit",
+      "ts": "2026-08-15T13:45:15.100000000Z",
+      "kind": "tool.completed",
+      "payload": { "tool_output": {}, "is_error": false, "duration_ms": 12 }
+    }
+  ],
+  "expected": {
+    "dependency_graph": [],
+    "certificate_status": {
+      "value": "unknown",
+      "reason_codes": ["coverage_deficit"]
+    },
+    "invalidation": {
+      "before_mutation": "unknown",
+      "after_mutation": "unknown",
+      "mutated_dependency_keys": []
+    }
+  },
+  "notes": [
+    "coverage-deficit is invariant #7 enforced at the engine layer; no observer producer in observation_coverage means bash I/O is invisible, so no valid status is permitted"
+  ]
+}

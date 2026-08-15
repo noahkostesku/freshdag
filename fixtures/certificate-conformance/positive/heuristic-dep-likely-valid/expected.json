@@ -1,0 +1,4 @@
+{
+  "invariant_check": "pass",
+  "reason": "heuristic deps cap at likely-valid (invariant #7)"
+}

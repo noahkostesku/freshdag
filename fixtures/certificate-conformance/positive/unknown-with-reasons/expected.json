@@ -1,0 +1,4 @@
+{
+  "invariant_check": "pass",
+  "reason": "unknown status with populated reasons is legal; recipe_hash not required for unknown"
+}

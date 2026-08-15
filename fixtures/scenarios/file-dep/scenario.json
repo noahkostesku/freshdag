@@ -1,0 +1,50 @@
+{
+  "scenario": "file-dep",
+  "schema": "freshdag.scenario/v0.1",
+  "description": "Artifact brief.md depends on notes.md. When notes.md changes, the certificate must become stale with a reason naming that dependency.",
+  "input_observations": [
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000001",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-file-dep",
+      "ts": "2026-08-15T13:45:14.220000000Z",
+      "kind": "fs.read",
+      "payload": {
+        "path": "/repo/notes.md",
+        "size": 128
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000002",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-file-dep",
+      "ts": "2026-08-15T13:45:15.100000000Z",
+      "kind": "fs.write",
+      "payload": {
+        "path": "/repo/brief.md",
+        "size": 512,
+        "mode": "truncate"
+      }
+    }
+  ],
+  "expected": {
+    "dependency_graph": [
+      {
+        "dependency_key": "file:///repo/notes.md",
+        "scheme": "file",
+        "trust_class": "exact"
+      }
+    ],
+    "certificate_status": { "value": "valid" },
+    "invalidation": {
+      "before_mutation": "valid",
+      "after_mutation": "stale",
+      "mutated_dependency_keys": ["file:///repo/notes.md"]
+    }
+  },
+  "notes": [
+    "fixture 1 in docs/EVALUATION.md §2"
+  ]
+}
