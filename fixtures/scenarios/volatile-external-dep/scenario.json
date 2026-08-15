@@ -1,20 +1,19 @@
 {
   "scenario": "volatile-external-dep",
   "schema": "freshdag.scenario/v0.1",
-  "description": "The recipe calls web.search — a source with no trustworthy freshness signal. Certificate status is capped at likely-valid within TTL and unknown after TTL expires. It MUST never be valid.",
+  "description": "The recipe calls web.search \u2014 a source with no trustworthy freshness signal. Certificate status is capped at likely-valid within TTL and unknown after TTL expires. It MUST never be valid.",
   "input_observations": [
     {
       "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000040",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
       "session_id": "sess-volatile",
-      "ts": "2026-08-15T13:45:14.220000000Z",
-      "kind": "tool.invoked",
+      "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
+      "ts": "2026-08-15T13:45:13.000000000Z",
+      "kind": "computation.started",
       "payload": {
-        "tool_name": "web.search",
-        "tool_kind": "builtin",
-        "tool_input": { "q": "acme pricing changes 2026" },
-        "cwd": "/repo"
+        "recipe_id": "pricing-watch",
+        "recipe_hash": "blake3:1cc4c8682b09910b587ecc7df112f5d58734bc729b232bbf23984048aaf8eabc"
       }
     },
     {
@@ -22,9 +21,93 @@
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
       "session_id": "sess-volatile",
+      "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
+      "ts": "2026-08-15T13:45:14.220000000Z",
+      "kind": "tool.invoked",
+      "payload": {
+        "tool_name": "web.search",
+        "tool_kind": "builtin",
+        "tool_input": {
+          "q": "acme pricing changes 2026"
+        },
+        "cwd": "/repo"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000042",
+      "producer": "freshdag-probe-web-search",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile",
+      "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
+      "ts": "2026-08-15T13:45:14.500000000Z",
+      "kind": "probe.checked",
+      "payload": {
+        "scheme": "web.search",
+        "key": "q=acme pricing changes 2026",
+        "observed_fingerprint": "blake3:47e2ee3be83f06c1c0a43cef2fe5a269bacf79a159e0b42b2a6b6fca3d63659d",
+        "trust_class": "volatile",
+        "ttl_seconds": 3600,
+        "result": "match"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000043",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile",
+      "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.100000000Z",
       "kind": "tool.completed",
-      "payload": { "tool_output": {}, "is_error": false, "duration_ms": 800 }
+      "payload": {
+        "tool_output": {},
+        "is_error": false,
+        "duration_ms": 800
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000044",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile",
+      "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
+      "ts": "2026-08-15T13:45:15.200000000Z",
+      "kind": "fs.write",
+      "payload": {
+        "path": "/repo/pricing.md",
+        "size": 300,
+        "mode": "truncate",
+        "hash": "blake3:5bf9ae444a907ae7bc15075dde4924f567188ec7478f83334e39d9dcb41e7fba"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000045",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile",
+      "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
+      "ts": "2026-08-15T13:45:15.300000000Z",
+      "kind": "artifact.produced",
+      "payload": {
+        "artifact_id": "blake3:5bf9ae444a907ae7bc15075dde4924f567188ec7478f83334e39d9dcb41e7fba",
+        "path": "/repo/pricing.md",
+        "content_hash": "blake3:5bf9ae444a907ae7bc15075dde4924f567188ec7478f83334e39d9dcb41e7fba",
+        "kind": "text/markdown",
+        "size": 300,
+        "produced_by": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
+        "comparator": "exact"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000046",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile",
+      "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
+      "ts": "2026-08-15T13:45:15.400000000Z",
+      "kind": "computation.ended",
+      "payload": {
+        "status": "ok"
+      }
     }
   ],
   "expected": {
@@ -37,17 +120,22 @@
     ],
     "certificate_status": {
       "value": "likely-valid",
-      "reason_codes": ["trust-class-volatile-caps-at-likely-valid"]
+      "reason_codes": [
+        "trust-class-volatile-caps-at-likely-valid"
+      ]
     },
     "invalidation": {
       "before_mutation": "likely-valid",
       "after_mutation": "unknown",
-      "after_mutation_reason_codes": ["ttl-expired"],
+      "after_mutation_reason_codes": [
+        "ttl-expired"
+      ],
       "mutated_dependency_keys": []
     }
   },
   "notes": [
-    "fixture 7 in docs/EVALUATION.md §2",
-    "after_mutation=unknown models the TTL-expiry case; no world mutation required"
+    "fixture 7 in docs/EVALUATION.md \u00a72",
+    "after_mutation=unknown models the TTL-expiry case; no world mutation required",
+    "There is deliberately no input_probes block: no probe ships for web.search and none can, so this scenario also pins the engine's volatile rule from ARCHITECTURE.md \u00a77 \u2014 inside TTL is likely-valid, outside is unknown. The harness advances its injected clock past ttl_seconds to reach after_mutation."
   ]
 }

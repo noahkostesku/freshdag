@@ -1,20 +1,19 @@
 {
   "scenario": "coverage-deficit",
   "schema": "freshdag.scenario/v0.1",
-  "description": "The adapter reports a bash tool.invoked but no observer is present in observation_coverage. Per certificate-contract §Coverage-Deficit, the engine MUST cap status at unknown even though every declared dependency is exact and matches.",
+  "description": "The adapter reports a bash tool.invoked but no observer is present in observation_coverage. Per certificate-contract \u00a7Coverage-Deficit, the engine MUST cap status at unknown even though every declared dependency is exact and matches.",
   "input_observations": [
     {
       "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000050",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
       "session_id": "sess-coverage-deficit",
-      "ts": "2026-08-15T13:45:14.220000000Z",
-      "kind": "tool.invoked",
+      "computation_id": "comp:1a0780afd326239e29f7346a923bf08b327144bcb125c18946b25a8fa7e67c31",
+      "ts": "2026-08-15T13:45:13.000000000Z",
+      "kind": "computation.started",
       "payload": {
-        "tool_name": "bash",
-        "tool_kind": "bash",
-        "tool_input": { "command": "cat notes.md" },
-        "cwd": "/repo"
+        "recipe_id": "deficit",
+        "recipe_hash": "blake3:3cb68b444f1f2caaba2d8e4d36391de80ae21e18c6dfb289d4aa374106fd8158"
       }
     },
     {
@@ -22,24 +21,83 @@
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
       "session_id": "sess-coverage-deficit",
+      "computation_id": "comp:1a0780afd326239e29f7346a923bf08b327144bcb125c18946b25a8fa7e67c31",
+      "ts": "2026-08-15T13:45:14.220000000Z",
+      "kind": "tool.invoked",
+      "payload": {
+        "tool_name": "bash",
+        "tool_kind": "bash",
+        "tool_input": {
+          "command": "cat notes.md"
+        },
+        "cwd": "/repo"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000052",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-coverage-deficit",
+      "computation_id": "comp:1a0780afd326239e29f7346a923bf08b327144bcb125c18946b25a8fa7e67c31",
       "ts": "2026-08-15T13:45:15.100000000Z",
       "kind": "tool.completed",
-      "payload": { "tool_output": {}, "is_error": false, "duration_ms": 12 }
+      "payload": {
+        "tool_output": {},
+        "is_error": false,
+        "duration_ms": 12
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000053",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-coverage-deficit",
+      "computation_id": "comp:1a0780afd326239e29f7346a923bf08b327144bcb125c18946b25a8fa7e67c31",
+      "ts": "2026-08-15T13:45:15.200000000Z",
+      "kind": "artifact.produced",
+      "payload": {
+        "artifact_id": "blake3:1edce21da6bf400794a45addb70b1acf5ae79d309ca7726ea7e8c1ff573d6de0",
+        "path": "/repo/out.txt",
+        "content_hash": "blake3:1edce21da6bf400794a45addb70b1acf5ae79d309ca7726ea7e8c1ff573d6de0",
+        "kind": "text/plain",
+        "size": 32,
+        "produced_by": "comp:1a0780afd326239e29f7346a923bf08b327144bcb125c18946b25a8fa7e67c31",
+        "comparator": "exact"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000054",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-coverage-deficit",
+      "computation_id": "comp:1a0780afd326239e29f7346a923bf08b327144bcb125c18946b25a8fa7e67c31",
+      "ts": "2026-08-15T13:45:15.300000000Z",
+      "kind": "computation.ended",
+      "payload": {
+        "status": "ok"
+      }
     }
   ],
   "expected": {
     "dependency_graph": [],
     "certificate_status": {
       "value": "unknown",
-      "reason_codes": ["coverage-deficit"]
+      "reason_codes": [
+        "coverage-deficit"
+      ]
     },
     "invalidation": {
       "before_mutation": "unknown",
       "after_mutation": "unknown",
-      "mutated_dependency_keys": []
+      "mutated_dependency_keys": [],
+      "after_mutation_reason_codes": [
+        "coverage-deficit"
+      ]
     }
   },
   "notes": [
-    "coverage-deficit is invariant #7 enforced at the engine layer; no observer producer in observation_coverage means bash I/O is invisible, so no valid status is permitted"
+    "coverage-deficit is invariant #7 enforced at the engine layer; no observer producer in observation_coverage means bash I/O is invisible, so no valid status is permitted",
+    "The engine reports two artifact-scoped reasons here, both true: `coverage-deficit` (the bash subprocess nobody watched) and `no-dependencies-observed` (its consequence). Artifact-scoped reasons are ordered cause-before-symptom, so reasons[0] is the coverage deficit.",
+    "after_mutation is also `unknown` for the same reason: with no observed edge there is nothing a world mutation could change."
   ]
 }

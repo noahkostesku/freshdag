@@ -8,18 +8,72 @@
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
       "session_id": "sess-irrelevant",
-      "ts": "2026-08-15T13:45:14.220000000Z",
-      "kind": "fs.read",
-      "payload": { "path": "/repo/notes.md", "size": 128 }
+      "computation_id": "comp:8bbbce2af013eb44e0bfb981ba53ad408f6ea5ba7b1fc19cda1a8b8b472989d0",
+      "ts": "2026-08-15T13:45:13.000000000Z",
+      "kind": "computation.started",
+      "payload": {
+        "recipe_id": "brief",
+        "recipe_hash": "blake3:79cdf501816fb0ac43776d2f12eb52f35068956b00e7ef80d3651358cbd5850e"
+      }
     },
     {
       "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000011",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
       "session_id": "sess-irrelevant",
+      "computation_id": "comp:8bbbce2af013eb44e0bfb981ba53ad408f6ea5ba7b1fc19cda1a8b8b472989d0",
+      "ts": "2026-08-15T13:45:14.220000000Z",
+      "kind": "fs.read",
+      "payload": {
+        "path": "/repo/notes.md",
+        "size": 128,
+        "hash": "blake3:754b6dc3f8728b1991298d8359218165de3ef7439963168565aaaaf7a99b3edd"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000012",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-irrelevant",
+      "computation_id": "comp:8bbbce2af013eb44e0bfb981ba53ad408f6ea5ba7b1fc19cda1a8b8b472989d0",
       "ts": "2026-08-15T13:45:15.100000000Z",
       "kind": "fs.write",
-      "payload": { "path": "/repo/brief.md", "size": 512, "mode": "truncate" }
+      "payload": {
+        "path": "/repo/brief.md",
+        "size": 512,
+        "mode": "truncate",
+        "hash": "blake3:014c777fd4684e1994134767ade25b4db7b7e23d86379b6c01c2a2b22aac6641"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000013",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-irrelevant",
+      "computation_id": "comp:8bbbce2af013eb44e0bfb981ba53ad408f6ea5ba7b1fc19cda1a8b8b472989d0",
+      "ts": "2026-08-15T13:45:15.200000000Z",
+      "kind": "artifact.produced",
+      "payload": {
+        "artifact_id": "blake3:014c777fd4684e1994134767ade25b4db7b7e23d86379b6c01c2a2b22aac6641",
+        "path": "/repo/brief.md",
+        "content_hash": "blake3:014c777fd4684e1994134767ade25b4db7b7e23d86379b6c01c2a2b22aac6641",
+        "kind": "text/markdown",
+        "size": 512,
+        "produced_by": "comp:8bbbce2af013eb44e0bfb981ba53ad408f6ea5ba7b1fc19cda1a8b8b472989d0",
+        "comparator": "exact"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000014",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-irrelevant",
+      "computation_id": "comp:8bbbce2af013eb44e0bfb981ba53ad408f6ea5ba7b1fc19cda1a8b8b472989d0",
+      "ts": "2026-08-15T13:45:15.300000000Z",
+      "kind": "computation.ended",
+      "payload": {
+        "status": "ok"
+      }
     }
   ],
   "expected": {
@@ -30,14 +84,28 @@
         "trust_class": "exact"
       }
     ],
-    "certificate_status": { "value": "valid" },
+    "certificate_status": {
+      "value": "valid"
+    },
     "invalidation": {
       "before_mutation": "valid",
       "after_mutation": "valid",
-      "mutated_dependency_keys": ["file:///repo/README.md"]
+      "mutated_dependency_keys": [
+        "file:///repo/README.md"
+      ]
     }
   },
   "notes": [
-    "fixture 2 in docs/EVALUATION.md §2; verifies scope of the dependency graph"
-  ]
+    "fixture 2 in docs/EVALUATION.md \u00a72; verifies scope of the dependency graph",
+    "README.md has no input_probes entry and is not an edge, so mutating it changes nothing the engine consults. after_mutation stays `valid`, which is why this scenario needs no after_mutation_reason_codes."
+  ],
+  "input_probes": {
+    "file:///repo/notes.md": {
+      "trust_class": "exact",
+      "no_change_yields": "match",
+      "after_mutation_yields": "drift",
+      "observed_fingerprint": "blake3:754b6dc3f8728b1991298d8359218165de3ef7439963168565aaaaf7a99b3edd",
+      "mutated_fingerprint": "blake3:1cfcba579a2f73e12091fbbb29a9149f6b89b62b1570f0247a1ded3236d34a1a"
+    }
+  }
 }
