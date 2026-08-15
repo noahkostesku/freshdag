@@ -5,18 +5,23 @@
 //! <root>/
 //!   events.jsonl     canonical append-only observation log
 //!   coverage.jsonl   append-only producer coverage-manifest registrations
+//!   derived/         disposable materialization of the graph
 //! ```
 //!
-//! Both files are append-only (invariant #4). Nothing else lives here
-//! yet; derived-state layouts land in a follow-up and, per invariant #5,
-//! will be droppable and rebuildable from these two files alone.
+//! The two files are append-only (invariant #4). `derived/` is not: it is
+//! deleted and rewritten wholesale by [`Store::rebuild_derived`], and per
+//! invariant #5 it is droppable and rebuildable from those two files
+//! alone.
 
 use std::path::{Path, PathBuf};
 
 use freshdag_core::ir::{CoverageManifest, IrEvent};
 
 use crate::coverage::CoverageRegistry;
+use crate::derived::{drop_derived, source_digest, LoadedDerived, DERIVED_DIR_NAME};
 use crate::error::StoreError;
+use crate::graph::DerivedGraph;
+use crate::order::linearize;
 use crate::reader::{read_log, scan_log, LogScan};
 use crate::sink::{AppendOutcome, JsonlSink, SinkOptions};
 
@@ -141,6 +146,68 @@ impl Store {
     /// Number of events dropped by this store's sink under back-pressure.
     pub fn dropped_count(&self) -> u64 {
         self.sink.dropped_count()
+    }
+
+    // ------------------------------------------------ derived state
+
+    /// Path of the disposable derived-state directory.
+    pub fn derived_dir(&self) -> PathBuf {
+        self.root.join(DERIVED_DIR_NAME)
+    }
+
+    /// Replay the canonical log into a [`DerivedGraph`] **in memory**,
+    /// without touching `derived/`.
+    ///
+    /// Returns the graph and the source digest binding it to the log.
+    ///
+    /// # Errors
+    ///
+    /// As [`read_log`].
+    pub fn derive_graph(&self) -> Result<(DerivedGraph, String), StoreError> {
+        let canonical = linearize(self.read_log()?.into_iter());
+        let digest = source_digest(&canonical, &self.coverage);
+        Ok((DerivedGraph::replay(canonical, &self.coverage), digest))
+    }
+
+    /// Drop `derived/` and rebuild it from the canonical log.
+    ///
+    /// This is the only supported way to produce derived state. There is
+    /// deliberately no incremental-update path: an incrementally-updated
+    /// derived directory can drift from the log, and the whole point of
+    /// invariant #5 is that it cannot.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Io`] if the directory cannot be replaced, or as
+    /// [`read_log`].
+    pub fn rebuild_derived(&self) -> Result<DerivedGraph, StoreError> {
+        let (graph, digest) = self.derive_graph()?;
+        graph.write_to(&self.derived_dir(), &digest)?;
+        Ok(graph)
+    }
+
+    /// Read `derived/` back, if it exists.
+    ///
+    /// Returns `Ok(None)` when there is no derived state. The caller must
+    /// check [`LoadedDerived::matches`] against
+    /// [`Store::derive_graph`]'s digest before trusting it — a derived
+    /// directory is a cache, never an authority.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Io`] or [`StoreError::MalformedRecord`] if the
+    /// directory exists but cannot be read.
+    pub fn load_derived(&self) -> Result<Option<LoadedDerived>, StoreError> {
+        DerivedGraph::read_from(&self.derived_dir())
+    }
+
+    /// Delete `derived/`. A missing directory is success.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Io`] if the directory exists and cannot be removed.
+    pub fn drop_derived(&self) -> Result<(), StoreError> {
+        drop_derived(&self.derived_dir())
     }
 }
 

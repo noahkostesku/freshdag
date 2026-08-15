@@ -1,10 +1,10 @@
 //! FreshDAG storage layer.
 //!
-//! Owns the append-only canonical observation log. Derived-state
-//! materializations (graph, indices) land in a follow-up and must be
-//! reconstructable from this log — architectural invariants #4
-//! (append-only) and #5 (derived state is disposable) in
-//! `ARCHITECTURE.md`, and `docs/adr/0005-append-only-observations.md`.
+//! Owns the append-only canonical observation log and the derived graph
+//! materialized from it. Derived state is reconstructable from the log
+//! alone — architectural invariants #4 (append-only) and #5 (derived
+//! state is disposable) in `ARCHITECTURE.md`, and
+//! `docs/adr/0005-append-only-observations.md`.
 //!
 //! # Shape
 //!
@@ -25,7 +25,13 @@
 //!   invariant #5 rests on.
 //! - [`CoverageRegistry`] records which producers declared what, so the
 //!   engine can populate `Certificate.observation_coverage`.
-//! - [`Store`] is the directory-level facade over the two files.
+//! - [`DerivedGraph`] is the replay of the log into three derived views:
+//!   per-computation dependency edges, the reverse `depends_on` index
+//!   (blast radius), and per-computation producer attribution. It is
+//!   built *only* by replaying, and it materializes under `derived/`,
+//!   which may be deleted at any time.
+//! - [`Store`] is the directory-level facade over the two canonical
+//!   files and the disposable `derived/` directory.
 //!
 //! # Three orders, deliberately distinct
 //!
@@ -43,7 +49,9 @@
 #![warn(missing_docs)]
 
 mod coverage;
+mod derived;
 mod error;
+mod graph;
 mod order;
 mod reader;
 mod sink;
@@ -53,7 +61,16 @@ mod store;
 mod testing;
 
 pub use coverage::{CoverageLookup, CoverageRegistration, CoverageRegistry, ProducerKey};
+pub use derived::{
+    drop_derived, source_digest, DerivedManifest, LoadedDerived, DERIVED_DIR_NAME, DERIVED_FILES,
+    DERIVED_FORMAT,
+};
 pub use error::StoreError;
+pub use graph::{
+    Accounting, ComputationCoverage, ComputationNode, CoverageObligation, DerivedGraph,
+    EdgeConflict, ExcludedEdge, ExclusionReason, GraphDefect, OutputRecord, ReverseIndexEntry,
+    SilenceMeaning, EDGE_BEARING_KINDS,
+};
 pub use order::{
     linearize, linearize_checked, DuplicateEventId, Linearization, ProducerOrderViolation,
     ProducerStreams,

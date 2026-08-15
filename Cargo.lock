@@ -417,6 +417,7 @@ dependencies = [
 name = "freshdag-store"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "freshdag-core",
  "serde",
  "serde_json",
