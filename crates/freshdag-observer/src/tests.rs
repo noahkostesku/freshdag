@@ -239,8 +239,8 @@ mod coverage_deficit {
     use freshdag_core::computation::ComputationId;
     use freshdag_core::dependency::ValidityStatus;
     use freshdag_core::ir::{
-        CoverageManifest, EventKind, EventKindPattern, Hash, HashAlgo, IrEvent, ToolInvoked,
-        ToolKind,
+        CoverageManifest, EventKind, EventKindPattern, Hash, HashAlgo, IrEvent, ProducerRole,
+        ToolInvoked, ToolKind,
     };
 
     use crate::observer::{CommandInvocation, Observer};
@@ -305,6 +305,7 @@ mod coverage_deficit {
     /// subprocess are observer territory.
     fn adapter_manifest(emits: &[&str]) -> CoverageManifest {
         CoverageManifest {
+            role: ProducerRole::Adapter,
             producer: ADAPTER_PRODUCER.to_string(),
             version: "0.1.0".to_string(),
             platforms: vec![],
@@ -541,42 +542,59 @@ mod coverage_deficit {
         }
     }
 
-    // ---------------- KNOWN GAP (escalated, not worked around) -------
+    // ---------------- REGRESSION: the gap this workstream found ------
 
-    /// **Characterization test for a defect in
-    /// `Certificate::check_coverage_deficit`, not an endorsement of
-    /// this behavior.** When core tightens the rule this test SHOULD
-    /// fail; read this comment before "fixing" it.
+    /// Regression test for the invariant-#7 hole this workstream found
+    /// and Wave 2 Phase A closed. It began life as a characterization
+    /// test asserting `is_ok()` — the defective behavior — and was
+    /// inverted once `ProducerRole` landed. **Do not weaken it.**
     ///
     /// certificate-contract §Coverage-Deficit requires an *observer*
-    /// producer to discharge the obligation. The implementation accepts
-    /// **any** producer whose `emits` matches `fs.read`/`fs.write`, and
-    /// it never consults `partial`. Adapter-contract §Required Behavior
+    /// producer to discharge the obligation created by a `bash`/`task`
+    /// invocation. The original implementation accepted **any**
+    /// producer whose `emits` matched `fs.read`/`fs.write`, and
+    /// `CoverageEntry` carried no way to tell the difference.
+    ///
+    /// That was not hypothetical: adapter-contract §Required Behavior
     /// #4's canonical manifest declares exactly
     /// `emits: [..., "fs.read", "fs.write"]` with
     /// `partial: { "fs.read": "only from Read tool; subprocess reads
-    /// via observer" }`.
-    ///
-    /// So once W6.2's store half attaches real producer manifests, the
-    /// Claude adapter's own fs claim will discharge the obligation for
-    /// a Bash invocation it explicitly did not observe — making the
+    /// via observer" }` — the adapter's own `partial` note states the
+    /// fact that should disqualify it, with nothing enforcing it. So
+    /// once real producer manifests were attached to certificates, the
+    /// Claude adapter's fs claim would have discharged the obligation
+    /// for a Bash invocation it explicitly did not observe, making the
     /// rule vacuous on exactly the platform (macOS) it exists to
-    /// protect. `CoverageEntry` cannot currently express the
-    /// difference: it carries neither a producer role nor `partial`.
+    /// protect.
+    ///
+    /// The fix is `ProducerRole`: only `role: Observer` discharges.
+    /// Note this is a *role* check and deliberately not a `partial`
+    /// check — the fsatrace observer legitimately carries `partial`
+    /// notes (rename-atomic writes, mmap reads), so a partial-based
+    /// rule would mean nothing could ever discharge the obligation.
+    /// `partial` is about fidelity; this is about vantage point.
     #[test]
-    fn known_gap_adapter_fs_claim_wrongly_discharges_bash_obligation() {
+    fn adapter_fs_claim_does_not_discharge_bash_obligation() {
         let stub_manifest = StubObserver::new().coverage();
         let adapter = adapter_manifest(&["tool.*", "fs.read", "fs.write"]);
         let events = vec![tool_invoked(ADAPTER_PRODUCER, ToolKind::Bash)];
 
-        let cert = valid_cert(vec![
-            CoverageEntry::from(&adapter),
-            CoverageEntry::from(&stub_manifest),
-        ]);
+        // Precondition: the adapter really does claim fs coverage, so
+        // this test fails for the intended reason rather than because
+        // the manifest was empty.
+        let adapter_entry = CoverageEntry::from(&adapter);
+        assert!(adapter_entry.covers(EventKind::FsRead));
+        assert!(matches!(adapter_entry.role, ProducerRole::Adapter));
+
+        let cert = valid_cert(vec![adapter_entry, CoverageEntry::from(&stub_manifest)]);
 
         assert!(
-            cert.check_coverage_deficit(&events).is_ok(),
-            "documents current core behavior; see the doc comment"
+            matches!(
+                cert.check_coverage_deficit(&events),
+                Err(InvariantError::CoverageDeficit { ref tool_kind }) if tool_kind == "bash"
+            ),
+            "an adapter's fs.* claim must not discharge a bash obligation \
+             it cannot see inside (invariant #7)"
         );
     }
 }

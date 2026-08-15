@@ -118,6 +118,7 @@ impl Observer for FsatraceObserver {
                 capabilities.insert(k.to_string(), json!(false));
             }
             return CoverageManifest {
+                role: ProducerRole::Observer,
                 producer: "freshdag-observer-fsatrace".to_string(),
                 version: self.version.clone(),
                 platforms: vec!["linux-x86_64".to_string(), "linux-arm64".to_string()],

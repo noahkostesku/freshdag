@@ -74,6 +74,7 @@ impl ScriptedObserver {
     #[must_use]
     pub fn zero_coverage(producer: &str) -> CoverageManifest {
         CoverageManifest {
+            role: ProducerRole::Observer,
             producer: producer.to_string(),
             version: "test".to_string(),
             platforms: vec!["any".to_string()],
