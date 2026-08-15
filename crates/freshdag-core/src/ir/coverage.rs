@@ -59,6 +59,31 @@ impl From<String> for EventKindPattern {
     }
 }
 
+/// What vantage point a producer observes from.
+///
+/// Load-bearing for the coverage-deficit rule
+/// (`docs/contracts/certificate-contract.md §Coverage-Deficit Rule`):
+/// only an [`Observer`](ProducerRole::Observer) sees below the agent-tool
+/// layer, so only an `Observer` can discharge the observation obligation
+/// created by a `bash`/`task` invocation.
+///
+/// This is deliberately *not* expressed through `partial`. `partial` is
+/// about **fidelity** — the fsatrace observer legitimately carries
+/// partial notes (rename-atomic writes, mmap reads), so a partial-based
+/// rule would mean nothing could ever discharge the obligation. What
+/// matters here is **vantage point**, which is a role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProducerRole {
+    /// Compiles a runtime's telemetry into IR. Sees only what the
+    /// runtime exposes at the tool boundary; blind inside subprocesses.
+    Adapter,
+    /// Observes below the tool layer (syscalls, filesystem, processes).
+    Observer,
+    /// Reports external-state freshness checks.
+    Probe,
+}
+
 /// A producer's declared coverage.
 ///
 /// This is the machine-readable version of the observer/adapter contract
@@ -72,6 +97,10 @@ pub struct CoverageManifest {
     pub producer: String,
     /// Producer semver.
     pub version: String,
+    /// What vantage point this producer observes from. REQUIRED — there
+    /// is deliberately no `#[serde(default)]`, because a defaulted role
+    /// is a silent-wrong-answer generator on the invariant-#7 path.
+    pub role: ProducerRole,
     /// Platforms this manifest applies to (e.g., `["linux-x86_64",
     /// "linux-arm64"]`). An empty list means "any platform."
     #[serde(default)]

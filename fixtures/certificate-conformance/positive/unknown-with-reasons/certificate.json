@@ -28,11 +28,11 @@
     "reasons": [
       {
         "dependency_key": "https://acme.com/pricing",
-        "reason": "probe_unknown"
+        "reason": "probe-unknown"
       }
     ]
   },
   "observation_coverage": [
-    { "producer": "freshdag-adapter-claude", "version": "0.1.0" }
+    { "producer": "freshdag-adapter-claude", "version": "0.1.0", "role": "adapter" }
   ]
 }

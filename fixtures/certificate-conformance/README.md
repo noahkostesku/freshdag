@@ -20,6 +20,24 @@ files:
   }
   ```
 
+### Two different fields named `reason` — do not confuse them
+
+- `expected.json`'s top-level **`reason`** is a harness field. When
+  `invariant_check` is `fail` it MUST be an `InvariantError` variant
+  name (`NakedVolatile`, `EmptyObservationCoverage`, ...); when `pass`
+  it is free-text prose. It is NOT a wire reason code.
+- `certificate.json`'s **`status.reasons[].reason`** is a wire reason
+  code from the closed `ReasonCode` set (kebab-case; see
+  `schemas/certificate/v0.1.json`): `drift`, `probe-unknown`,
+  `trust-class-heuristic-caps-at-likely-valid`,
+  `trust-class-volatile-caps-at-likely-valid`, `ttl-expired`,
+  `coverage-deficit`, `no-dependencies-observed`,
+  `probe-trust-demoted`, `producer-missing-from-coverage`. Anything
+  else fails to deserialize.
+- `certificate.json`'s optional **`status.reasons[].detail`** is human
+  context only (probe failure text, HTTP status). No decision may key
+  off it.
+
 ## The load-bearing rule
 
 **Do not change core types to make an `illegal/` fixture pass.** The

@@ -12,7 +12,7 @@ mod validity;
 pub use fingerprint::{Fingerprint, FingerprintKind, FingerprintParseError};
 pub use trust::TrustClass;
 pub use validity::{
-    EdgeVerdict, Validity, ValidityAggregationError, ValidityReason, ValidityStatus,
+    EdgeVerdict, ReasonCode, Validity, ValidityAggregationError, ValidityReason, ValidityStatus,
 };
 
 use serde::{Deserialize, Serialize};

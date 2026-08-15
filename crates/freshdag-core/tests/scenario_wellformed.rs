@@ -2,11 +2,13 @@
 //! consumes these lands in Wave 2; today we assert only that every
 //! scenario file parses, matches the schema, and carries the
 //! invariant-#6/#7 mirror at the scenario level (any non-`valid`
-//! status must carry at least one `reason_codes[]` entry).
+//! status must carry at least one `reason_codes[]` entry, and every
+//! such entry parses into the closed [`ReasonCode`] set).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use freshdag_core::dependency::ReasonCode;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -28,7 +30,6 @@ struct Expected {
     dependency_graph: Vec<Edge>,
     certificate_status: CertStatus,
     #[serde(default)]
-    #[allow(dead_code)] // parsed for shape validation; not asserted on today
     invalidation: Option<Invalidation>,
 }
 
@@ -47,10 +48,16 @@ struct CertStatus {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct Invalidation {
+    #[allow(dead_code)]
     before_mutation: Option<String>,
+    #[allow(dead_code)]
     after_mutation: Option<String>,
+    /// Reason-pinned assertion for `after_mutation`
+    /// (docs/EVALUATION.md §Reason-pinned assertions).
+    #[serde(default)]
+    after_mutation_reason_codes: Vec<String>,
+    #[allow(dead_code)]
     #[serde(default)]
     mutated_dependency_keys: Vec<String>,
 }
@@ -78,6 +85,45 @@ fn discover_scenarios(root: &Path) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+/// Every reason code must be a member of the closed [`ReasonCode`] set,
+/// not arbitrary prose. This mirrors the schema enum in
+/// `schemas/scenario/v0.1.json` and keeps scenario expectations
+/// machine-checkable (invariant #13).
+fn check_reason_codes(file: &Path, codes: &[String], failures: &mut Vec<String>) {
+    for code in codes {
+        let parsed: Result<ReasonCode, _> =
+            serde_json::from_value(serde_json::Value::String(code.clone()));
+        if parsed.is_err() {
+            failures.push(format!(
+                "{}: reason_code `{code}` is not a member of ReasonCode; \
+                 scenario reason codes must use the canonical kebab-case wire form",
+                file.display(),
+            ));
+        }
+    }
+}
+
+/// Every dependency-graph edge names a legal trust class and a
+/// non-empty key + scheme.
+fn check_edges(file: &Path, edges: &[Edge], failures: &mut Vec<String>) {
+    for edge in edges {
+        if !LEGAL_TRUST_CLASSES.contains(&edge.trust_class.as_str()) {
+            failures.push(format!(
+                "{}: edge `{}` trust_class `{}` is not one of {LEGAL_TRUST_CLASSES:?}",
+                file.display(),
+                edge.dependency_key,
+                edge.trust_class
+            ));
+        }
+        if edge.dependency_key.is_empty() || edge.scheme.is_empty() {
+            failures.push(format!(
+                "{}: edge has empty dependency_key or scheme",
+                file.display()
+            ));
+        }
+    }
 }
 
 #[test]
@@ -163,23 +209,16 @@ fn every_scenario_is_well_formed() {
             ));
         }
 
-        // Every dependency-graph edge names a legal trust class.
-        for edge in &scenario.expected.dependency_graph {
-            if !LEGAL_TRUST_CLASSES.contains(&edge.trust_class.as_str()) {
-                failures.push(format!(
-                    "{}: edge `{}` trust_class `{}` is not one of {LEGAL_TRUST_CLASSES:?}",
-                    file.display(),
-                    edge.dependency_key,
-                    edge.trust_class
-                ));
-            }
-            if edge.dependency_key.is_empty() || edge.scheme.is_empty() {
-                failures.push(format!(
-                    "{}: edge has empty dependency_key or scheme",
-                    file.display()
-                ));
-            }
+        check_reason_codes(
+            &file,
+            &scenario.expected.certificate_status.reason_codes,
+            &mut failures,
+        );
+        if let Some(inv) = &scenario.expected.invalidation {
+            check_reason_codes(&file, &inv.after_mutation_reason_codes, &mut failures);
         }
+
+        check_edges(&file, &scenario.expected.dependency_graph, &mut failures);
 
         // Notes and description are informational; enforce non-empty
         // description so scenarios stay self-explanatory.

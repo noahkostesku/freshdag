@@ -44,7 +44,21 @@
             "value": { "enum": ["valid", "likely-valid", "stale", "unknown"] },
             "reason_codes": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "description": "Closed set of machine-checkable reason codes; mirrors freshdag_core::dependency::ReasonCode.",
+                "enum": [
+                  "drift",
+                  "probe-unknown",
+                  "no-probe-available",
+                  "trust-class-heuristic-caps-at-likely-valid",
+                  "trust-class-volatile-caps-at-likely-valid",
+                  "ttl-expired",
+                  "coverage-deficit",
+                  "no-dependencies-observed",
+                  "probe-trust-demoted",
+                  "producer-missing-from-coverage"
+                ]
+              }
             }
           }
         },
@@ -54,6 +68,25 @@
           "properties": {
             "before_mutation": { "enum": ["valid", "likely-valid", "stale", "unknown"] },
             "after_mutation": { "enum": ["valid", "likely-valid", "stale", "unknown"] },
+            "after_mutation_reason_codes": {
+              "description": "Why after_mutation is what it is. Required by docs/EVALUATION.md §Reason-pinned assertions whenever after_mutation is not 'valid' — pinning only the status lets a broken engine that always reports 'stale' pass.",
+              "type": "array",
+              "items": {
+                "description": "Closed set of machine-checkable reason codes; mirrors freshdag_core::dependency::ReasonCode.",
+                "enum": [
+                  "drift",
+                  "probe-unknown",
+                  "no-probe-available",
+                  "trust-class-heuristic-caps-at-likely-valid",
+                  "trust-class-volatile-caps-at-likely-valid",
+                  "ttl-expired",
+                  "coverage-deficit",
+                  "no-dependencies-observed",
+                  "probe-trust-demoted",
+                  "producer-missing-from-coverage"
+                ]
+              }
+            },
             "mutated_dependency_keys": {
               "type": "array",
               "items": { "type": "string" }

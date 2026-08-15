@@ -122,15 +122,169 @@ impl EdgeVerdict {
     }
 }
 
+/// The closed set of machine-checkable reasons a dependency edge can
+/// contribute to a non-`Valid` status.
+///
+/// Wire form is kebab-case, matching [`ValidityStatus`] and
+/// `schemas/certificate/v0.1.json` (`status.reasons[].reason`). The set
+/// is deliberately closed: invariant #6 requires every skip/reuse
+/// decision be explainable, and invariant #13 requires that
+/// explanation be testable rather than free text. Downstream consumers
+/// (engine, CLI renderer, scenario harness) key behaviour off these
+/// variants, never off prose.
+///
+/// Codes are either **edge-scoped** (they explain one entry of
+/// `depends_on[]`, and `dependency_key` names it) or **artifact-scoped**
+/// (they explain the certificate as a whole, and `dependency_key` is the
+/// empty string `""` — never `null`, never omitted). See
+/// [`ReasonCode::is_artifact_scoped`].
+///
+/// Three FreshDAG vocabularies share spellings and must not be
+/// conflated: reason codes (this enum), probe results
+/// ([`ProbeResult`](crate::probe::ProbeResult) /
+/// `probe.checked.result`), and validity statuses
+/// ([`ValidityStatus`]). `drift` and `unknown` appear in more than one
+/// of them and mean different things in each.
+///
+/// Adding a variant is a contract change — see
+/// `.claude/rules/architecture.md` — because it widens the schema enum
+/// consumers validate against, even though it is additive to the Rust
+/// enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReasonCode {
+    /// Edge-scoped. A probe observed a fingerprint different from the
+    /// recorded one.
+    Drift,
+    /// Edge-scoped. A probe **ran** and could not decide. Per invariant
+    /// #7 this is never treated as fresh.
+    ///
+    /// Contrast [`ReasonCode::NoProbeAvailable`], which asserts no probe
+    /// ran at all. Reporting `ProbeUnknown` when no probe existed is a
+    /// false statement to a user reading `freshdag why`.
+    ProbeUnknown,
+    /// Edge-scoped. No probe could be selected: none registered for the
+    /// scheme, registration failed, arbitration tied, or the probe that
+    /// recorded the fingerprint was removed (probe-contract
+    /// §Anti-thrash Protocol, "Probe removal").
+    NoProbeAvailable,
+    /// Edge-scoped. The edge matched, but at `Heuristic` trust;
+    /// invariant #8 forbids reporting it as `Valid`, so the artifact
+    /// status is capped at `LikelyValid`.
+    TrustClassHeuristicCapsAtLikelyValid,
+    /// Edge-scoped. The edge matched inside its TTL at `Volatile`
+    /// trust, so the artifact status is capped at `LikelyValid`.
+    TrustClassVolatileCapsAtLikelyValid,
+    /// Edge-scoped. A `Volatile` dependency's TTL elapsed without
+    /// re-observation.
+    TtlExpired,
+    /// Edge-scoped. The signal backing the recorded trust class
+    /// disappeared; the engine emitted a `probe.trust_demoted`
+    /// diagnostic and forced re-observation.
+    ProbeTrustDemoted,
+    /// Artifact-scoped. The computation exhibited effects no producer
+    /// in `observation_coverage` claims to cover (certificate contract
+    /// §Coverage-Deficit Rule).
+    CoverageDeficit,
+    /// Artifact-scoped. An event in the stream names a producer absent
+    /// from `observation_coverage`, so its silences cannot be
+    /// interpreted.
+    ProducerMissingFromCoverage,
+    /// Artifact-scoped. The computation produced an artifact with zero
+    /// observed dependencies — absence of evidence is not evidence of
+    /// freshness.
+    NoDependenciesObserved,
+}
+
+impl ReasonCode {
+    /// The canonical wire string for this reason code.
+    ///
+    /// The `match` below is exhaustive by construction, so adding a
+    /// variant fails to COMPILE until this table is updated. The
+    /// `reason_code_serde_and_as_wire_str_agree` and
+    /// `schema_reason_enums_match_rust` tests in
+    /// `crates/freshdag-core/src/tests.rs` then keep this table, serde,
+    /// and both JSON schemas from drifting apart.
+    #[must_use]
+    pub const fn as_wire_str(self) -> &'static str {
+        match self {
+            Self::Drift => "drift",
+            Self::ProbeUnknown => "probe-unknown",
+            Self::NoProbeAvailable => "no-probe-available",
+            Self::TrustClassHeuristicCapsAtLikelyValid => {
+                "trust-class-heuristic-caps-at-likely-valid"
+            }
+            Self::TrustClassVolatileCapsAtLikelyValid => {
+                "trust-class-volatile-caps-at-likely-valid"
+            }
+            Self::TtlExpired => "ttl-expired",
+            Self::ProbeTrustDemoted => "probe-trust-demoted",
+            Self::CoverageDeficit => "coverage-deficit",
+            Self::ProducerMissingFromCoverage => "producer-missing-from-coverage",
+            Self::NoDependenciesObserved => "no-dependencies-observed",
+        }
+    }
+
+    /// Does this code explain the certificate as a whole rather than
+    /// one `depends_on[]` edge?
+    ///
+    /// Artifact-scoped reasons carry `dependency_key: ""` and sort
+    /// after every edge-scoped reason in `status.reasons[]`. That
+    /// ordering is contractual — `cert_id` hashes it and fixtures pin
+    /// `reasons[0]` (certificate contract §Reason Codes, "Ordering").
+    #[must_use]
+    pub const fn is_artifact_scoped(self) -> bool {
+        match self {
+            Self::CoverageDeficit
+            | Self::ProducerMissingFromCoverage
+            | Self::NoDependenciesObserved => true,
+            Self::Drift
+            | Self::ProbeUnknown
+            | Self::NoProbeAvailable
+            | Self::TrustClassHeuristicCapsAtLikelyValid
+            | Self::TrustClassVolatileCapsAtLikelyValid
+            | Self::TtlExpired
+            | Self::ProbeTrustDemoted => false,
+        }
+    }
+}
+
+impl core::fmt::Display for ReasonCode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_wire_str())
+    }
+}
+
 /// A reason for a non-`Valid` status, for `status.reasons[]` in the
 /// certificate (see certificate-contract.md).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidityReason {
     /// Dependency key this reason refers to.
+    ///
+    /// For an artifact-scoped reason (see
+    /// [`ReasonCode::is_artifact_scoped`]) this is the empty string
+    /// `""` — the sentinel, never `null` and never omitted, so the
+    /// schema's `required` list stays unchanged.
     pub dependency_key: String,
-    /// Machine-parseable reason code (e.g., `"drift"`, `"probe_unknown"`,
-    /// `"ttl_expired"`, `"coverage_deficit"`).
-    pub reason: String,
+    /// Machine-parseable reason code. This — and only this — is what
+    /// downstream decisions key off.
+    pub reason: ReasonCode,
+    /// Human context for the reason (probe failure text, HTTP status,
+    /// rate-limit description, ...).
+    ///
+    /// `detail` is NEVER load-bearing for a decision. No consumer —
+    /// engine, CLI, UI, or integration — may branch on its contents,
+    /// parse it, or treat its absence as meaningful; it exists purely
+    /// so a human reading `freshdag why` learns *why* the probe said
+    /// what it said. Decisions key off [`ValidityReason::reason`].
+    ///
+    /// Two further rules from certificate-contract §The `detail` field:
+    /// `detail` MUST be deterministic (it is inside the `cert_id`
+    /// preimage, so no elapsed times, timestamps, PIDs, ports, or retry
+    /// counters), and it MUST NOT carry secrets (no credentials, no
+    /// `Authorization` headers, no response bodies).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// A validity determination for an artifact — status plus per-edge
@@ -161,6 +315,13 @@ impl Validity {
     /// `Drift`/`Unknown` edge contributes a reason keyed by the
     /// `dependency_key` the caller supplied.
     ///
+    /// **Ordering is contractual.** Reasons are emitted in
+    /// `dependency_keys` order — which the caller supplies in
+    /// `depends_on[]` order — and artifact-scoped reasons (see
+    /// [`ReasonCode::is_artifact_scoped`]) sort after every edge-scoped
+    /// reason. `cert_id` hashes `status.reasons[]` and fixtures pin
+    /// `reasons[0]`, so reordering is a wire-visible change.
+    ///
     /// # Errors
     ///
     /// Returns [`ValidityAggregationError::MismatchedLengths`] if the
@@ -180,7 +341,8 @@ impl Validity {
                 value: ValidityStatus::Unknown,
                 reasons: vec![ValidityReason {
                     dependency_key: String::new(),
-                    reason: "no_dependencies_observed".to_string(),
+                    reason: ReasonCode::NoDependenciesObserved,
+                    detail: None,
                 }],
             });
         }
@@ -196,25 +358,29 @@ impl Validity {
             match v {
                 EdgeVerdict::Drift => reasons.push(ValidityReason {
                     dependency_key: key.clone(),
-                    reason: "drift".to_string(),
+                    reason: ReasonCode::Drift,
+                    detail: None,
                 }),
                 EdgeVerdict::Unknown => reasons.push(ValidityReason {
                     dependency_key: key.clone(),
-                    reason: "probe_unknown".to_string(),
+                    reason: ReasonCode::ProbeUnknown,
+                    detail: None,
                 }),
                 EdgeVerdict::Match {
                     recorded_trust_class: TrustClass::Heuristic,
                     ..
                 } => reasons.push(ValidityReason {
                     dependency_key: key.clone(),
-                    reason: "trust_class_heuristic_caps_at_likely_valid".to_string(),
+                    reason: ReasonCode::TrustClassHeuristicCapsAtLikelyValid,
+                    detail: None,
                 }),
                 EdgeVerdict::Match {
                     recorded_trust_class: TrustClass::Volatile,
                     ..
                 } => reasons.push(ValidityReason {
                     dependency_key: key.clone(),
-                    reason: "trust_class_volatile_caps_at_likely_valid".to_string(),
+                    reason: ReasonCode::TrustClassVolatileCapsAtLikelyValid,
+                    detail: None,
                 }),
                 EdgeVerdict::Match {
                     recorded_trust_class: TrustClass::Exact | TrustClass::Versioned,
@@ -222,6 +388,11 @@ impl Validity {
                 } => {}
             }
         }
+        // Contractual ordering: edge-scoped reasons in depends_on[]
+        // order, artifact-scoped reasons last. `sort_by_key` is stable,
+        // so the edge order established above is preserved.
+        reasons.sort_by_key(|r| r.reason.is_artifact_scoped());
+
         // Only surface reasons for non-Valid statuses.
         if matches!(status, ValidityStatus::Valid) {
             reasons.clear();

@@ -28,7 +28,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern};
+use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, ProducerRole};
 use serde::Serialize;
 use serde_json::json;
 use time::OffsetDateTime;
@@ -100,6 +100,7 @@ impl Observer for FsatraceObserver {
         CoverageManifest {
             producer: "freshdag-observer-fsatrace".to_string(),
             version: self.version.clone(),
+            role: ProducerRole::Observer,
             platforms: vec!["linux-x86_64".to_string(), "linux-arm64".to_string()],
             emits: vec![
                 EventKindPattern::from("fs.read"),

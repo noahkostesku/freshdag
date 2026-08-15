@@ -68,7 +68,25 @@
             "required": ["dependency_key", "reason"],
             "properties": {
               "dependency_key": { "type": "string" },
-              "reason":         { "type": "string" }
+              "reason": {
+                "description": "Closed set of machine-checkable reason codes; mirrors freshdag_core::dependency::ReasonCode.",
+                "enum": [
+                  "drift",
+                  "probe-unknown",
+                  "no-probe-available",
+                  "trust-class-heuristic-caps-at-likely-valid",
+                  "trust-class-volatile-caps-at-likely-valid",
+                  "ttl-expired",
+                  "coverage-deficit",
+                  "no-dependencies-observed",
+                  "probe-trust-demoted",
+                  "producer-missing-from-coverage"
+                ]
+              },
+              "detail": {
+                "description": "Human context only. MUST NOT be load-bearing for any decision.",
+                "type": "string"
+              }
             }
           }
         }
@@ -78,10 +96,12 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["producer", "version"],
+        "required": ["producer", "version", "role"],
         "properties": {
           "producer":            { "type": "string" },
           "version":             { "type": "string" },
+          "role":                { "description": "Vantage point this producer observes from. Only 'observer' can discharge the bash/task coverage obligation; adapters are blind inside subprocesses by construction.", "enum": ["adapter", "observer", "probe"] },
+          "emits":               { "description": "Event-kind patterns this producer declares it emits; mirrors CoverageEntry.emits. Required for the coverage-deficit rule to be checkable from the certificate alone.", "type": "array", "items": { "type": "string" } },
           "known_limitations":   { "type": "array", "items": { "type": "string" } }
         }
       }

@@ -108,6 +108,31 @@ that shared certificates cannot be silently rewritten.
   `likely-valid`. This is a JSON Schema-enforced assertion (see
   `schemas/certificate/v0.1.json`), not just a convention.
 - **`status.reasons`** MUST be non-empty whenever `status.value != valid`.
+- **`status.reasons[].reason`** MUST be a member of the closed reason
+  set below (kebab-case wire form, schema-enforced by
+  `schemas/certificate/v0.1.json`, mirrored by
+  `freshdag_core::dependency::ReasonCode`). Free-text reasons are not
+  accepted; a certificate carrying an unrecognized code fails to
+  deserialize. This is what makes invariant #6 ("every skip/reuse
+  decision is explainable") machine-checkable rather than advisory.
+
+  | Code | Meaning |
+  | --- | --- |
+  | `drift` | Recorded fingerprint no longer matches. |
+  | `probe-unknown` | Probe could not determine whether the dependency changed. |
+  | `trust-class-heuristic-caps-at-likely-valid` | Edge matched at `heuristic` trust; status capped. |
+  | `trust-class-volatile-caps-at-likely-valid` | Edge matched at `volatile` trust; status capped. |
+  | `ttl-expired` | A `volatile` dependency's TTL elapsed without re-observation. |
+  | `coverage-deficit` | Effects occurred that no producer in `observation_coverage` claims. |
+  | `no-dependencies-observed` | No edges observed at all; absence of evidence is not freshness. |
+  | `probe-trust-demoted` | Probe reported a lower trust class than recorded. |
+  | `producer-missing-from-coverage` | An event's producer is absent from `observation_coverage`. |
+
+  Adding a code is a contract change (`.claude/rules/architecture.md`).
+- **`status.reasons[].detail`** is OPTIONAL human context (probe
+  failure text, HTTP status, rate-limit description). It is NEVER
+  load-bearing: no consumer may branch on, parse, or infer meaning
+  from its contents or its absence. Decisions key off `reason` only.
 - **`produced_by.recipe_hash`** MUST be present whenever
   `status.value` is `valid` or `likely-valid`.
 - **`observation_coverage`** lists every producer that contributed to

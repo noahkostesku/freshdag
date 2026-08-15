@@ -31,7 +31,7 @@
     "dependency_graph": [],
     "certificate_status": {
       "value": "unknown",
-      "reason_codes": ["coverage_deficit"]
+      "reason_codes": ["coverage-deficit"]
     },
     "invalidation": {
       "before_mutation": "unknown",

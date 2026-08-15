@@ -7,7 +7,7 @@
 //! dance, mmap-pessimistic reads, symlink swaps) can be encoded here
 //! before the real Linux backend supports them.
 
-use freshdag_core::ir::{CoverageManifest, EventKindPattern, IrEvent};
+use freshdag_core::ir::{CoverageManifest, EventKindPattern, IrEvent, ProducerRole};
 
 use crate::observer::{CommandInvocation, ObservationRun, Observer, ObserverError};
 
@@ -59,6 +59,7 @@ impl ScriptedObserver {
         CoverageManifest {
             producer: producer.to_string(),
             version: "test".to_string(),
+            role: ProducerRole::Observer,
             platforms: vec!["any".to_string()],
             emits: vec![EventKindPattern::from("fs.*")],
             partial: std::collections::BTreeMap::new(),

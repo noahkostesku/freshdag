@@ -39,10 +39,40 @@ pub enum ProbeResult {
     /// Could not verify — probe MUST return this on any failure that
     /// might otherwise be mis-classified as `Match`.
     Unknown {
-        /// Human-readable reason (goes on the certificate's `reasons`).
+        /// Human-readable context for the failure.
+        ///
+        /// This string becomes the **non-normative `detail`** of a
+        /// [`ValidityReason`](crate::dependency::ValidityReason) whose
+        /// `reason` code is
+        /// [`ReasonCode::ProbeUnknown`](crate::dependency::ReasonCode::ProbeUnknown).
+        /// It is NEVER the reason code itself: probes do not choose
+        /// reason codes and MUST NOT emit code-like strings here.
+        ///
+        /// It MUST satisfy the rules in certificate-contract §The
+        /// `detail` field:
+        ///
+        /// - **Deterministic.** Identical inputs and identical external
+        ///   responses MUST yield byte-identical strings. No elapsed
+        ///   times, timestamps, PIDs, ephemeral ports, memory
+        ///   addresses, or retry counters — this string lands inside
+        ///   the `cert_id` preimage, and nondeterminism there makes
+        ///   certificates unreproducible.
+        /// - **Secret-free.** No credentials, no `Authorization`
+        ///   headers, no query strings that may embed tokens, no
+        ///   response bodies. Certificates are shareable primitives.
+        /// - SHOULD be under 512 bytes.
+        ///
+        /// Good: `"http-status=500"`. Bad: `"failed after 1.7s"`,
+        /// `"GET https://api/x?token=abc123 -> 401"`.
         reason: String,
         /// Whether the caller may retry (network failures) or must not
         /// (endpoint misconfiguration).
+        ///
+        /// This does NOT appear on the certificate. Probes MUST record
+        /// it in the `probe.checked` payload so it survives in the
+        /// append-only log (invariant #5), where the engine and
+        /// `freshdag watch` consume it. Certificates explain; the log
+        /// schedules.
         retryable: bool,
     },
 }

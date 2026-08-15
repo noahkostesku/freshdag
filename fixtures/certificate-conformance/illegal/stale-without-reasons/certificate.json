@@ -24,6 +24,6 @@
   ],
   "status": { "value": "stale", "checked": "2026-08-15T13:46:08.001Z" },
   "observation_coverage": [
-    { "producer": "freshdag-adapter-claude", "version": "0.1.0" }
+    { "producer": "freshdag-adapter-claude", "version": "0.1.0", "role": "adapter" }
   ]
 }

@@ -29,11 +29,11 @@
     "reasons": [
       {
         "dependency_key": "web.search://q=x",
-        "reason": "trust_class_volatile_caps_at_likely_valid"
+        "reason": "trust-class-volatile-caps-at-likely-valid"
       }
     ]
   },
   "observation_coverage": [
-    { "producer": "freshdag-adapter-claude", "version": "0.1.0" }
+    { "producer": "freshdag-adapter-claude", "version": "0.1.0", "role": "adapter" }
   ]
 }

@@ -13,7 +13,7 @@
 
 use std::process::{Command, Stdio};
 
-use freshdag_core::ir::{CoverageManifest, EventKindPattern};
+use freshdag_core::ir::{CoverageManifest, EventKindPattern, ProducerRole};
 
 use crate::observer::{CommandInvocation, ObservationRun, Observer, ObserverError};
 
@@ -45,6 +45,7 @@ impl Observer for StubObserver {
         CoverageManifest {
             producer: "freshdag-observer-stub".to_string(),
             version: self.version.clone(),
+            role: ProducerRole::Observer,
             platforms: vec!["any".to_string()],
             emits: vec![],
             partial: std::collections::BTreeMap::new(),

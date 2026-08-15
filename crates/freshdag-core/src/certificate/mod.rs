@@ -15,8 +15,8 @@ use time::OffsetDateTime;
 
 use crate::artifact::Artifact;
 use crate::computation::ComputationId;
-use crate::dependency::{Dependency, TrustClass, ValidityReason, ValidityStatus};
-use crate::ir::{CoverageManifest, EventKind, EventKindPattern, Hash, IrEvent};
+use crate::dependency::{Dependency, ReasonCode, TrustClass, ValidityReason, ValidityStatus};
+use crate::ir::{CoverageManifest, EventKind, EventKindPattern, Hash, IrEvent, ProducerRole};
 
 /// Schema identifier expected on every v0.1 certificate.
 pub const CERTIFICATE_SCHEMA_V0_1: &str = "freshdag.certificate/v0.1";
@@ -110,6 +110,12 @@ pub struct CoverageEntry {
     pub producer: String,
     /// Producer semver.
     pub version: String,
+    /// What vantage point this producer observes from.
+    ///
+    /// REQUIRED — no `#[serde(default)]`. This field is what lets
+    /// [`Certificate::check_coverage_deficit`] tell an adapter from an
+    /// observer; defaulting it would reintroduce the hole it closes.
+    pub role: ProducerRole,
     /// Event-kind patterns this producer emits. Populated from the
     /// producer's [`CoverageManifest`]. Required for
     /// [`Certificate::check_coverage_deficit`] to be checkable from
@@ -126,6 +132,7 @@ impl From<&CoverageManifest> for CoverageEntry {
         Self {
             producer: m.producer.clone(),
             version: m.version.clone(),
+            role: m.role,
             emits: m.emits.clone(),
             known_limitations: m.known_limitations.clone(),
         }
@@ -197,6 +204,65 @@ pub enum InvariantError {
     /// (anti-pattern from certificate contract).
     #[error("observation_coverage is empty")]
     EmptyObservationCoverage,
+}
+
+/// How an [`InvariantError`] translates to certificate emission.
+///
+/// This is deliberately NOT `Option<ReasonCode>`. The idiomatic call
+/// site for an `Option` — `if let Some(rc) = err.reason_code() {
+/// downgrade(rc) }` — silently ignores every structural defect,
+/// precisely the errors that must be loudest, and it sits directly on
+/// the invariant-#7 path. A two-case enum forces the caller to name
+/// what it does in both worlds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[must_use]
+pub enum ReasonMapping {
+    /// An evaluation outcome: downgrade `status.value` and attach this
+    /// reason. The certificate is well-formed; the world is not clean.
+    Downgrade(ReasonCode),
+    /// The certificate is malformed. Emit nothing. This is a producer
+    /// defect, not a fact about the world; downgrading would hide the
+    /// bug behind a legitimate-looking `unknown`.
+    StructuralDefect,
+}
+
+impl InvariantError {
+    /// How this error should be translated when a caller is deciding
+    /// whether — and with what status — to emit a certificate.
+    ///
+    /// [`InvariantError::CoverageDeficit`] and
+    /// [`InvariantError::ProducerMissingFromCoverage`] describe a real,
+    /// reportable gap in evidence, so they map to
+    /// [`ReasonMapping::Downgrade`]. Every other variant describes a
+    /// defect in the certificate's own construction and maps to
+    /// [`ReasonMapping::StructuralDefect`].
+    ///
+    /// # `ProducerMissingFromCoverage` is dual-use
+    ///
+    /// - On the **emission** path the engine assembles
+    ///   `observation_coverage` itself from the producers it ran, so a
+    ///   missing producer is an engine bug. W4 MUST treat it as fatal
+    ///   there and refuse to emit, regardless of this mapping.
+    /// - On the **re-check** path (a certificate produced on machine A
+    ///   and checked on machine B — certificate-contract §Portability)
+    ///   the coverage list came from the document, so a missing
+    ///   producer is real evidence that the certificate's silences
+    ///   cannot be interpreted. `Downgrade` to `Unknown` is correct
+    ///   there.
+    pub const fn reason_mapping(&self) -> ReasonMapping {
+        match self {
+            Self::CoverageDeficit { .. } => ReasonMapping::Downgrade(ReasonCode::CoverageDeficit),
+            Self::ProducerMissingFromCoverage { .. } => {
+                ReasonMapping::Downgrade(ReasonCode::ProducerMissingFromCoverage)
+            }
+            Self::SchemaMismatch(_)
+            | Self::ValidWithLowerTrust { .. }
+            | Self::MissingRecipeHash { .. }
+            | Self::MissingReasons { .. }
+            | Self::NakedVolatile(_)
+            | Self::EmptyObservationCoverage => ReasonMapping::StructuralDefect,
+        }
+    }
 }
 
 impl Certificate {
@@ -274,8 +340,12 @@ impl Certificate {
     ///   contract). Enforced regardless of status.
     /// - If `status.value == Valid` and any `tool.invoked` of kind
     ///   `bash|task` occurred, at least one producer in
-    ///   `observation_coverage` MUST declare fs.* coverage (via its
-    ///   `emits` list). Otherwise the certificate is a coverage
+    ///   `observation_coverage` with `role == ProducerRole::Observer`
+    ///   MUST declare fs.* coverage (via its `emits` list). An
+    ///   `Adapter`-role producer does NOT discharge the obligation
+    ///   however broad its `emits` list — it is blind inside
+    ///   subprocesses by construction. Otherwise the certificate is a
+    ///   coverage
     ///   deficit and MUST NOT be `valid`. This is why v0 on macOS
     ///   (StubObserver, zero fs coverage) reports `unknown` — not
     ///   `valid` — on any computation that invoked Bash.
@@ -306,10 +376,17 @@ impl Certificate {
             return Ok(());
         }
 
-        let has_fs_covered_observer = self
-            .observation_coverage
-            .iter()
-            .any(|c| c.covers(EventKind::FsRead) || c.covers(EventKind::FsWrite));
+        // ONLY an observer-role producer discharges the obligation. An
+        // adapter that declares fs.read/fs.write does NOT — adapters
+        // synthesize filesystem events from tool inputs they can see and
+        // are blind inside subprocesses by construction. Accepting any
+        // producer here let a `valid` certificate stand behind zero
+        // subprocess observation, which is exactly what this rule exists
+        // to prevent.
+        let has_fs_covered_observer = self.observation_coverage.iter().any(|c| {
+            matches!(c.role, ProducerRole::Observer)
+                && (c.covers(EventKind::FsRead) || c.covers(EventKind::FsWrite))
+        });
 
         for ev in events {
             if !matches!(ev.kind, EventKind::ToolInvoked) {

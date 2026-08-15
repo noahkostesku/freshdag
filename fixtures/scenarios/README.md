@@ -26,7 +26,14 @@ validates that every scenario file:
   legal statuses,
 - for any expected `stale` / `unknown` / `likely-valid` status,
   carries at least one `reason_codes[]` entry (invariant #6 mirrored
-  at the scenario level).
+  at the scenario level),
+- and that every `reason_codes[]` entry is a member of the closed
+  `ReasonCode` set — kebab-case wire form: `drift`, `probe-unknown`,
+  `trust-class-heuristic-caps-at-likely-valid`,
+  `trust-class-volatile-caps-at-likely-valid`, `ttl-expired`,
+  `coverage-deficit`, `no-dependencies-observed`,
+  `probe-trust-demoted`, `producer-missing-from-coverage`. See
+  `schemas/scenario/v0.1.json`.
 
 Once the engine exists, the same directory becomes the source of
 integration tests: `freshdag test fixtures/scenarios/*` will execute

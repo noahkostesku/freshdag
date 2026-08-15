@@ -83,7 +83,7 @@ originally specified. The current spec:
   volatile edge.
 - **`heuristic-probe-failure`** — ships an in-process HTTP server
   bound to `127.0.0.1:0`; the server returns 500 during check; assert
-  `status.reasons[0].code == "probe_unknown"` and the dependency key.
+  `status.reasons[0].reason == "probe-unknown"` and the dependency key.
   No CI-level network access.
 - **`reproducibility`** — the "recipe" is a scripted `recipe.sh`
   writing fixed bytes; the fixture asserts certificate emission is

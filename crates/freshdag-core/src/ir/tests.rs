@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{
     envelope::DecodeError, CoverageManifest, EventKind, EventKindPattern, FsRead, FsReadKind,
     FsWrite, FsWriteMode, Hash, HashAlgo, HashParseError, IrEvent, ToolCompleted, ToolInvoked,
-    ToolKind, TypedPayload,
+    ProducerRole, ToolKind, TypedPayload,
 };
 
 fn sample_uuid() -> Uuid {
@@ -256,6 +256,7 @@ fn coverage_manifest_covers_and_partial() {
     let manifest = CoverageManifest {
         producer: "freshdag-observer-fsatrace".to_string(),
         version: "0.1.0".to_string(),
+        role: ProducerRole::Observer,
         platforms: vec!["linux-x86_64".to_string()],
         emits: vec![
             EventKindPattern::from("fs.read"),
@@ -291,6 +292,7 @@ fn coverage_manifest_round_trip() {
     let manifest = CoverageManifest {
         producer: "freshdag-adapter-claude".to_string(),
         version: "0.1.0".to_string(),
+        role: ProducerRole::Adapter,
         platforms: vec![],
         emits: vec![
             EventKindPattern::from("tool.*"),

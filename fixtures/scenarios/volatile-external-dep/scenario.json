@@ -37,11 +37,12 @@
     ],
     "certificate_status": {
       "value": "likely-valid",
-      "reason_codes": ["trust_class_volatile_caps_at_likely_valid"]
+      "reason_codes": ["trust-class-volatile-caps-at-likely-valid"]
     },
     "invalidation": {
       "before_mutation": "likely-valid",
       "after_mutation": "unknown",
+      "after_mutation_reason_codes": ["ttl-expired"],
       "mutated_dependency_keys": []
     }
   },

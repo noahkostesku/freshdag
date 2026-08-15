@@ -32,11 +32,11 @@
     "reasons": [
       {
         "dependency_key": "https://acme.com/pricing",
-        "reason": "trust_class_heuristic_caps_at_likely_valid"
+        "reason": "trust-class-heuristic-caps-at-likely-valid"
       }
     ]
   },
   "observation_coverage": [
-    { "producer": "freshdag-adapter-claude", "version": "0.1.0" }
+    { "producer": "freshdag-adapter-claude", "version": "0.1.0", "role": "adapter" }
   ]
 }
