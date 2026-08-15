@@ -1,0 +1,11 @@
+{
+  "checks": [
+    {
+      "result": "drift",
+      "observed_fingerprint": "etag:\"v2\"",
+      "trust_class": "versioned",
+      "diagnostics": ["representation-recorded"],
+      "requests": 1
+    }
+  ]
+}

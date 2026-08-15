@@ -1,0 +1,11 @@
+{
+  "checks": [
+    {
+      "result": "drift",
+      "observed_fingerprint": "etag:W/\"v2\"",
+      "trust_class": "heuristic",
+      "diagnostics": ["probe.trust_demoted"],
+      "requests": 1
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "checks": [
+    {
+      "result": "match",
+      "observed_fingerprint": "blake3:f651bd4fe4db19e9911e20b96a50c480864ac80f7a0f5ee3ae44770b4f4b3eff",
+      "trust_class": "exact",
+      "diagnostics": ["content-hash-fallback", "representation-recorded"],
+      "requests": 1
+    },
+    {
+      "result": "drift",
+      "observed_fingerprint": "blake3:f0b2514e3a316100ae6bd6a7a7f81f140e290da22d85d2350ffda7ca154a1186",
+      "trust_class": "exact",
+      "diagnostics": ["content-hash-fallback", "representation-recorded"],
+      "requests": 1
+    }
+  ]
+}

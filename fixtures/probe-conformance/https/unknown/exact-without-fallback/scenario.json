@@ -1,0 +1,11 @@
+{
+  "description": "probe-contract §Trust-class Semantics: an `exact` dependency whose endpoint the probe cannot cheaply content-hash returns Unknown { retryable: true }, NOT a bare Drift. Reporting drift here would trigger recomputation on no evidence; reporting match would be invariant #7. Retryable because enabling fallback for this key makes the check possible.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "fallback-not-enabled",
+      "recorded_fingerprint": "blake3:f651bd4fe4db19e9911e20b96a50c480864ac80f7a0f5ee3ae44770b4f4b3eff",
+      "turns": [{ "kind": "respond", "status": 200, "headers": [] }]
+    }
+  ]
+}

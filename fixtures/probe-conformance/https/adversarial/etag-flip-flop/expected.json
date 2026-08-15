@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "result": "drift",
+      "observed_fingerprint": "etag:\"v2\"",
+      "trust_class": "versioned",
+      "diagnostics": [],
+      "requests": 1
+    },
+    {
+      "result": "drift",
+      "observed_fingerprint": "etag:\"v1\"",
+      "trust_class": "versioned",
+      "diagnostics": [],
+      "requests": 1
+    },
+    {
+      "result": "match",
+      "observed_fingerprint": "etag:\"v1\"",
+      "trust_class": "versioned",
+      "diagnostics": ["etag-instability"],
+      "requests": 1
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Cache-Control: immutable (RFC 8246) is the origin asserting the representation at this URL will never change. Rare, but exactly right for CDN-fingerprinted assets.",
+  "key": "https://cdn.example.test/app.a1b2c3.js",
+  "checks": [
+    {
+      "name": "still-immutable",
+      "recorded_fingerprint": "custom:immutable",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["Cache-Control", "public, max-age=31536000, immutable"]]
+        }
+      ]
+    }
+  ]
+}

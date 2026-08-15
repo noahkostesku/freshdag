@@ -1,0 +1,5 @@
+{
+  "checks": [
+    { "result": "unknown", "reason": "http-status=500", "retryable": true, "requests": 1 }
+  ]
+}

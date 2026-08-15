@@ -1,0 +1,6 @@
+{
+  "checks": [
+    { "result": "unknown", "reason": "auth-required http-status=401", "retryable": false },
+    { "result": "unknown", "reason": "auth-required http-status=403", "retryable": false }
+  ]
+}

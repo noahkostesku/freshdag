@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "cross-scheme-downgrade-refused",
+      "retryable": false,
+      "requests": 1
+    }
+  ]
+}

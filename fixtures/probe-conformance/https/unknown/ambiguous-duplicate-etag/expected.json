@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "ambiguous-etag distinct-fields=2",
+      "retryable": false,
+      "diagnostics": ["duplicate-etag"]
+    }
+  ]
+}

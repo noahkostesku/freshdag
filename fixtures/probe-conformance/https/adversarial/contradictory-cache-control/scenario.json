@@ -1,0 +1,17 @@
+{
+  "description": "An origin asserting both `immutable` and `no-store`. These contradict: one says the representation can never change, the other forbids assuming anything about it. Resolved toward the prohibition, because resolving toward `immutable` can report a changed resource as fresh while resolving toward `no-store` can only cost a recheck. The recorded fingerprint asserted immutability, so this also loses its version signal.",
+  "key": "https://cdn.example.test/app.a1b2c3.js",
+  "checks": [
+    {
+      "name": "immutable-and-no-store",
+      "recorded_fingerprint": "custom:immutable",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["Cache-Control", "immutable, no-store"]]
+        }
+      ]
+    }
+  ]
+}

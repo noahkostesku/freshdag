@@ -1,0 +1,17 @@
+{
+  "description": "Strong ETag changed. Strong equivalence is octet-level, so a changed strong tag is a change; trust class stays versioned.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "strong-etag-changed",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["ETag", "\"v2\""], ["Content-Type", "text/html"]]
+        }
+      ]
+    }
+  ]
+}

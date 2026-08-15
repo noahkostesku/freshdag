@@ -1,0 +1,11 @@
+{
+  "description": "TLS handshake or certificate validation failed. NOT retryable: an expired certificate or an untrusted chain is a misconfiguration whose resolution needs human or upstream action, and retryable:false is what tells the engine to force re-observation rather than spin.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "tls",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "fail", "error": "tls" }]
+    }
+  ]
+}

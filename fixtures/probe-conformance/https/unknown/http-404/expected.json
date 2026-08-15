@@ -1,0 +1,5 @@
+{
+  "checks": [
+    { "result": "unknown", "reason": "http-status=404", "retryable": false }
+  ]
+}

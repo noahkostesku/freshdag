@@ -1,0 +1,11 @@
+{
+  "description": "Recorded a strong ETag; the origin answers the conditional request with 304. The server itself asserts the representation is unchanged, which is the cheapest possible proof of freshness.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "304-not-modified",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "respond", "status": 304, "headers": [] }]
+    }
+  ]
+}

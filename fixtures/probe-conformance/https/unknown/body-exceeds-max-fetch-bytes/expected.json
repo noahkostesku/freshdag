@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "body-exceeds-max-fetch-bytes max-fetch-bytes=1024",
+      "retryable": false,
+      "diagnostics": ["content-hash-fallback"]
+    }
+  ]
+}

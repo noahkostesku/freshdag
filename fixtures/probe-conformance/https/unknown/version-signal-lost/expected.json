@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "version-signal-lost",
+      "retryable": false,
+      "diagnostics": ["probe.trust_demoted", "representation-recorded"]
+    }
+  ]
+}

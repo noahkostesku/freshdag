@@ -1,0 +1,17 @@
+{
+  "description": "Two ETag header fields that disagree. RFC 9110 allows exactly one. Note the FIRST field is byte-equal to the recorded fingerprint: a probe that took first() would report Match out of an ambiguity, which is precisely the shape of an invariant-#7 hole. There is no principled way to choose between them, so the probe refuses.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "conflicting-duplicates",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["ETag", "\"v1\""], ["ETag", "\"v2\""]]
+        }
+      ]
+    }
+  ]
+}

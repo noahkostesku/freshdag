@@ -1,0 +1,21 @@
+{
+  "description": "The fingerprint on the certificate is itself unusable. An unquoted ETag cannot be echoed in If-None-Match without inventing quotes; a non-IMF-fixdate cannot be sent as If-Modified-Since without the server silently answering 200, which the probe would misread as drift. Both are refused without touching the network (requests=0).",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "unquoted-recorded-etag",
+      "recorded_fingerprint": "etag:v1",
+      "turns": [{ "kind": "respond", "status": 304, "headers": [] }]
+    },
+    {
+      "name": "non-imf-recorded-mtime",
+      "recorded_fingerprint": "mtime:1994-11-06T08:49:37Z",
+      "turns": [{ "kind": "respond", "status": 304, "headers": [] }]
+    },
+    {
+      "name": "unsupported-kind",
+      "recorded_fingerprint": "version:42",
+      "turns": [{ "kind": "respond", "status": 304, "headers": [] }]
+    }
+  ]
+}

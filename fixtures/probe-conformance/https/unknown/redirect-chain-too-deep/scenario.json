@@ -1,0 +1,19 @@
+{
+  "description": "Six 3xx hops against a budget of five. A chain this deep is indistinguishable from a loop, and following it forever is a denial-of-service the probe would perform on itself.",
+  "key": "https://example.test/pricing",
+  "config": { "max_redirects": 5 },
+  "checks": [
+    {
+      "name": "too-deep",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 302, "headers": [["Location", "https://example.test/h1"]] },
+        { "kind": "respond", "status": 302, "headers": [["Location", "https://example.test/h2"]] },
+        { "kind": "respond", "status": 302, "headers": [["Location", "https://example.test/h3"]] },
+        { "kind": "respond", "status": 302, "headers": [["Location", "https://example.test/h4"]] },
+        { "kind": "respond", "status": 302, "headers": [["Location", "https://example.test/h5"]] },
+        { "kind": "respond", "status": 302, "headers": [["Location", "https://example.test/h6"]] }
+      ]
+    }
+  ]
+}

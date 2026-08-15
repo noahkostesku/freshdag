@@ -1,0 +1,17 @@
+{
+  "description": "The origin forbids caching assumptions outright. A validator is present, but no-store is a prohibition and the validator is an optimization; the prohibition wins. Correctness beats hit rate.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "no-store-with-etag",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["ETag", "\"v2\""], ["Cache-Control", "no-store"]]
+        }
+      ]
+    }
+  ]
+}

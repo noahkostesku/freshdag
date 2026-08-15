@@ -1,0 +1,5 @@
+{
+  "checks": [
+    { "result": "unknown", "reason": "transport-tls-failed", "retryable": false }
+  ]
+}

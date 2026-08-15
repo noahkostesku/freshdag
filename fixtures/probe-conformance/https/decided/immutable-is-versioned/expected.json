@@ -1,0 +1,11 @@
+{
+  "checks": [
+    {
+      "result": "match",
+      "observed_fingerprint": "custom:immutable",
+      "trust_class": "versioned",
+      "diagnostics": [],
+      "requests": 1
+    }
+  ]
+}

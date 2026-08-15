@@ -1,0 +1,11 @@
+{
+  "description": "Name resolution failed. Cannot be produced by a loopback server, which is why the transport seam exists.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "dns",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "fail", "error": "dns" }]
+    }
+  ]
+}

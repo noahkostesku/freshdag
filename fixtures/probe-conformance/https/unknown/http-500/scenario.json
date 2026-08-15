@@ -1,0 +1,11 @@
+{
+  "description": "Any 5xx. The origin is unwell; it said nothing about the resource. Retryable.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "server-error",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "respond", "status": 500, "headers": [] }]
+    }
+  ]
+}

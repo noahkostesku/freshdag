@@ -1,0 +1,27 @@
+{
+  "description": "probe-contract §Testing asks for an endpoint that flip-flops its ETag with no content change. Three checks against the same URL: \"v1\"->\"v2\", then \"v2\"->\"v1\", then a 200 that echoes the very If-None-Match we sent. The first two are indistinguishable, from inside a single check, from an endpoint that legitimately changed twice; they are Drift, and detecting the churn across them is the engine's anti-thrash job, not this probe's. The third IS statelessly detectable and is where the probe earns the etag-instability diagnostic. See README §The honest boundary.",
+  "key": "https://churn.example.test/pricing",
+  "checks": [
+    {
+      "name": "v1-to-v2",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 200, "headers": [["ETag", "\"v2\""]] }
+      ]
+    },
+    {
+      "name": "v2-back-to-v1",
+      "recorded_fingerprint": "etag:\"v2\"",
+      "turns": [
+        { "kind": "respond", "status": 200, "headers": [["ETag", "\"v1\""]] }
+      ]
+    },
+    {
+      "name": "200-echoing-our-if-none-match",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 200, "headers": [["ETag", "\"v1\""]] }
+      ]
+    }
+  ]
+}

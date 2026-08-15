@@ -1,0 +1,18 @@
+{
+  "description": "The endpoint requires credentials the probe does not hold and will never hold. Probes are unauthenticated and read-only by default; auth-configured probes are a separate variant.",
+  "key": "https://example.test/private/pricing",
+  "checks": [
+    {
+      "name": "unauthorized",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 401, "headers": [["WWW-Authenticate", "Bearer"]] }
+      ]
+    },
+    {
+      "name": "forbidden",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "respond", "status": 403, "headers": [] }]
+    }
+  ]
+}

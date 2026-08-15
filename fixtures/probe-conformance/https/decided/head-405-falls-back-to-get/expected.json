@@ -1,0 +1,11 @@
+{
+  "checks": [
+    {
+      "result": "match",
+      "observed_fingerprint": "etag:\"v1\"",
+      "trust_class": "versioned",
+      "diagnostics": ["head-not-allowed"],
+      "requests": 2
+    }
+  ]
+}

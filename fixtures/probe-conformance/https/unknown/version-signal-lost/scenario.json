@@ -1,0 +1,13 @@
+{
+  "description": "A dependency recorded as versioned (strong ETag) is now served with no validator at all. The probe refuses to decide and announces the demotion; the engine forces re-observation of every artifact edge depending on this URL before any certificate's trust class changes. Silently falling back to a weaker signal here is the anti-pattern the memo names first.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "etag-disappeared",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 200, "headers": [["Content-Type", "text/html"]] }
+      ]
+    }
+  ]
+}

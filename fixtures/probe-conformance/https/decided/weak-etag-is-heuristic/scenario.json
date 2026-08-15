@@ -1,0 +1,13 @@
+{
+  "description": "The origin now serves a WEAK ETag. RFC 9110 defines weak equivalence at the entity level, not the octet level, so this can only be heuristic. A versioned verdict here would launder a trust class (invariant #8). Versioned -> heuristic is a demotion and must be announced.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "weak-etag-observed",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 200, "headers": [["ETag", "W/\"v2\""]] }
+      ]
+    }
+  ]
+}

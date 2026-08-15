@@ -1,0 +1,11 @@
+{
+  "description": "TCP connect failed / connection reset. Transient, so retryable.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "connect",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "fail", "error": "connect" }]
+    }
+  ]
+}

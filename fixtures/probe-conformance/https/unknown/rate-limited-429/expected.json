@@ -1,0 +1,11 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "rate-limited http-status=429",
+      "retryable": true,
+      "diagnostics": ["rate-limited"],
+      "requests": 1
+    }
+  ]
+}

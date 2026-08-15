@@ -1,0 +1,17 @@
+{
+  "description": "Only Last-Modified is available: one-second resolution, clock skew, and lying intermediaries mean this is heuristic at best. Never promoted.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "last-modified-changed",
+      "recorded_fingerprint": "mtime:Sun, 06 Nov 1994 08:49:37 GMT",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["Last-Modified", "Mon, 07 Nov 1994 08:49:37 GMT"]]
+        }
+      ]
+    }
+  ]
+}

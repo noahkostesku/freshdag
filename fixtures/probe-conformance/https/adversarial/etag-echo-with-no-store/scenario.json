@@ -1,0 +1,17 @@
+{
+  "description": "The endpoint ignores conditional requests AND forbids caching. The validator is unchanged, so the verdict is Match, but the trust class it is reported at is volatile rather than versioned. A Match at volatile cannot aggregate to `valid` on a certificate, which is the intended effect: the probe is saying 'the tag is the same and I do not think that means much'.",
+  "key": "https://churn.example.test/pricing",
+  "checks": [
+    {
+      "name": "echo-with-no-store",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["ETag", "\"v1\""], ["Cache-Control", "no-store"]]
+        }
+      ]
+    }
+  ]
+}

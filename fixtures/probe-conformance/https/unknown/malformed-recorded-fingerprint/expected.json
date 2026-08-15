@@ -1,0 +1,22 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "recorded-fingerprint-malformed etag=unquoted",
+      "retryable": false,
+      "requests": 0
+    },
+    {
+      "result": "unknown",
+      "reason": "recorded-fingerprint-malformed mtime=not-imf-fixdate",
+      "retryable": false,
+      "requests": 0
+    },
+    {
+      "result": "unknown",
+      "reason": "unsupported-fingerprint-kind=version",
+      "retryable": false,
+      "requests": 0
+    }
+  ]
+}

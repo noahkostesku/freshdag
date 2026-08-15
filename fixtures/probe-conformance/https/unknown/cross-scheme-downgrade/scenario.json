@@ -1,0 +1,15 @@
+{
+  "description": "An https:// origin redirects to http://. Refused unconditionally, and refused BEFORE the downgraded hop is issued (requests=1). A redirect that drops the transport is indistinguishable from an active downgrade attack, and a freshness signal read over a downgraded connection is evidence of nothing. This fixture sets allow_plaintext_http=true to prove the refusal is not gated on that flag: the flag exists so a loopback fixture can be addressed directly, not so a remote origin can walk the probe off TLS.",
+  "key": "https://example.test/pricing",
+  "config": { "allow_plaintext_http": true },
+  "checks": [
+    {
+      "name": "downgrade-refused",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 301, "headers": [["Location", "http://example.test/pricing"]] },
+        { "kind": "respond", "status": 304, "headers": [] }
+      ]
+    }
+  ]
+}

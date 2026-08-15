@@ -1,0 +1,11 @@
+{
+  "description": "The request deadline elapsed. The endpoint did not respond, so nothing was verified. Retryable: a timeout is a transient.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "timeout",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "fail", "error": "timeout" }]
+    }
+  ]
+}

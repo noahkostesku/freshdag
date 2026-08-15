@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "version-signal-lost immutable",
+      "retryable": false,
+      "diagnostics": ["probe.trust_demoted", "contradictory-cache-control"]
+    }
+  ]
+}

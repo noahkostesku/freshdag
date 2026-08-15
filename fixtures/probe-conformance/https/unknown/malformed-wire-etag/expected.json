@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "version-signal-lost",
+      "retryable": false,
+      "diagnostics": ["malformed-etag", "probe.trust_demoted"]
+    }
+  ]
+}

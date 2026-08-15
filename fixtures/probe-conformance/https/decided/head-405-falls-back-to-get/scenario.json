@@ -1,0 +1,14 @@
+{
+  "description": "HEAD is preferred because it is O(headers). Origins that reject it with 405 get one GET retry, and exactly one: a server that 405s both must not make the probe spin.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "head-rejected-then-get",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 405, "headers": [["Allow", "GET"]] },
+        { "kind": "respond", "status": 304, "headers": [] }
+      ]
+    }
+  ]
+}

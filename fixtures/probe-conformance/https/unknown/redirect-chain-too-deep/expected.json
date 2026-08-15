@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "redirect-chain-too-deep max-redirects=5",
+      "retryable": false,
+      "requests": 6
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "checks": [
+    {
+      "result": "match",
+      "observed_fingerprint": "etag:\"v1\"",
+      "trust_class": "volatile",
+      "diagnostics": ["etag-instability", "probe.trust_demoted"],
+      "requests": 1
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "description": "A cross-origin redirect is followed but reported: the caller's dependency URL has effectively been rewritten upstream and they should know. The dependency key stays the ORIGINAL URL; the redirect target is metadata, never identity.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "followed-to-cdn",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 302,
+          "headers": [["Location", "https://cdn.example.test/pricing"]]
+        },
+        { "kind": "respond", "status": 304, "headers": [] }
+      ]
+    }
+  ]
+}

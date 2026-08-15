@@ -1,0 +1,5 @@
+{
+  "checks": [
+    { "result": "unknown", "reason": "transport-timeout", "retryable": true, "requests": 1 }
+  ]
+}

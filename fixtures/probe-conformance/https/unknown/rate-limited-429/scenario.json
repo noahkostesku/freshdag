@@ -1,0 +1,13 @@
+{
+  "description": "429 with a Retry-After. Retryable, and the server-provided backoff is surfaced on the cost report. Note the reason does NOT contain the Retry-After value: backoff is scheduling state, and the reason is certificate detail inside the cert_id preimage.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "rate-limited",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 429, "headers": [["Retry-After", "60"]] }
+      ]
+    }
+  ]
+}

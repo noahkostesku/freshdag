@@ -1,0 +1,13 @@
+{
+  "description": "The origin returns a bare, unquoted ETag (Apache and several CDNs have shipped this). It is NOT repaired by adding quotes: a repaired tag would be compared as though the server had spoken RFC 9110, which it did not. The malformed tag makes the validator unavailable, which lands on version-signal-lost.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "unquoted-etag",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [
+        { "kind": "respond", "status": 200, "headers": [["ETag", "v1"]] }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "A cleartext dependency key with the default configuration. Refused before any request is issued.",
+  "key": "http://example.test/pricing",
+  "checks": [
+    {
+      "name": "cleartext-key",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "respond", "status": 304, "headers": [] }]
+    }
+  ]
+}

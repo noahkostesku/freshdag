@@ -1,0 +1,22 @@
+{
+  "description": "Content-hash fallback against a body larger than max_fetch_bytes. The probe hashes while streaming and aborts at the cap rather than buffering an unbounded response. Not retryable: the body will be just as large next time.",
+  "key": "https://example.test/dump.bin",
+  "config": {
+    "max_fetch_bytes": 1024,
+    "content_hash_fallback": { "mode": "always" }
+  },
+  "checks": [
+    {
+      "name": "oversized",
+      "recorded_fingerprint": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [],
+          "body": { "repeat_byte": "x", "len": 65536 }
+        }
+      ]
+    }
+  ]
+}

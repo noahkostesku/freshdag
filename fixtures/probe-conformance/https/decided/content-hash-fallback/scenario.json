@@ -1,0 +1,33 @@
+{
+  "description": "Content-hash fallback: the only path that earns `exact`, and the only one that costs O(body). Opt-in per dependency key, because it flips the cost model. Raw octets are hashed with no canonicalization, so the pessimistic direction is the only direction it can be wrong in.",
+  "key": "https://example.test/pricing",
+  "config": {
+    "content_hash_fallback": { "mode": "for_keys", "keys": ["https://example.test/pricing"] }
+  },
+  "checks": [
+    {
+      "name": "identical-bytes",
+      "recorded_fingerprint": "blake3:f651bd4fe4db19e9911e20b96a50c480864ac80f7a0f5ee3ae44770b4f4b3eff",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["Content-Type", "text/plain"]],
+          "body": "pricing-page-v1\n"
+        }
+      ]
+    },
+    {
+      "name": "different-bytes",
+      "recorded_fingerprint": "blake3:f651bd4fe4db19e9911e20b96a50c480864ac80f7a0f5ee3ae44770b4f4b3eff",
+      "turns": [
+        {
+          "kind": "respond",
+          "status": 200,
+          "headers": [["Content-Type", "text/plain"]],
+          "body": "pricing-page-v2\n"
+        }
+      ]
+    }
+  ]
+}

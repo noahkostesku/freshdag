@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "result": "unknown",
+      "reason": "content-hash-fallback-required",
+      "retryable": true,
+      "requests": 0
+    }
+  ]
+}

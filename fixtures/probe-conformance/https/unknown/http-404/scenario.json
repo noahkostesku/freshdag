@@ -1,0 +1,11 @@
+{
+  "description": "A 4xx other than 429. The dependency is gone or forbidden, which is not the same as unchanged. Not retryable: retrying will not bring it back, and the engine must force re-observation.",
+  "key": "https://example.test/pricing",
+  "checks": [
+    {
+      "name": "not-found",
+      "recorded_fingerprint": "etag:\"v1\"",
+      "turns": [{ "kind": "respond", "status": 404, "headers": [] }]
+    }
+  ]
+}
