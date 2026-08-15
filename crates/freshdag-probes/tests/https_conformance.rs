@@ -296,100 +296,109 @@ fn run_fixture(fixture: &Path, failures: &mut Vec<String>) {
 
     for (check, want) in scenario.checks.into_iter().zip(expected.checks.iter()) {
         let name = format!("{label}[{}]", check.name);
-        let turns: Vec<ScriptedTurn> = check.turns.into_iter().map(TurnSpec::build).collect();
-        // A fresh transport per check: the probe is stateless by
-        // contract, so nothing may carry over between checks except the
-        // recorded fingerprint the fixture hands it.
-        let transport = Arc::new(ScriptedTransport::new(turns));
-        let probe = HttpsProbe::with_transport(transport, config.clone());
-        let outcome = probe.check_detailed(&scenario.key, &check.recorded_fingerprint, None);
+        run_check(&scenario.key, &config, check, want, &name, failures);
+    }
+}
 
-        let got = result_kind(&outcome.result);
-        if got != want.result {
+/// Run one check of one fixture against its expectation.
+fn run_check(
+    key: &str,
+    config: &HttpsProbeConfig,
+    check: CheckSpec,
+    want: &ExpectedCheck,
+    name: &str,
+    failures: &mut Vec<String>,
+) {
+    let turns: Vec<ScriptedTurn> = check.turns.into_iter().map(TurnSpec::build).collect();
+    // A fresh transport per check: the probe is stateless by contract,
+    // so nothing may carry over between checks except the recorded
+    // fingerprint the fixture hands it.
+    let transport = Arc::new(ScriptedTransport::new(turns));
+    let probe = HttpsProbe::with_transport(transport, config.clone());
+    let outcome = probe.check_detailed(key, &check.recorded_fingerprint, None);
+
+    let got = result_kind(&outcome.result);
+    if got != want.result {
+        failures.push(format!(
+            "{name}: expected {} but got {got}: {:?}",
+            want.result, outcome.result
+        ));
+        return;
+    }
+
+    // Invariant #7, restated for every fixture regardless of what it
+    // claims to test: an `unknown` expectation must never be satisfied
+    // by a `Match`, and the equality above is the only thing standing
+    // between those two.
+    if want.result == "unknown" {
+        assert!(
+            !matches!(outcome.result, ProbeResult::Match { .. }),
+            "{name}: fixture expected unknown; a Match here is an invariant-#7 violation"
+        );
+    }
+
+    match &outcome.result {
+        ProbeResult::Match {
+            observed_fp,
+            observed_trust_class,
+        }
+        | ProbeResult::Drift {
+            observed_fp,
+            observed_trust_class,
+        } => {
+            if let Some(expected_fp) = &want.observed_fingerprint {
+                if observed_fp != expected_fp {
+                    failures.push(format!(
+                        "{name}: observed_fingerprint {observed_fp} != expected {expected_fp}"
+                    ));
+                }
+            }
+            if let Some(expected_class) = want.trust_class {
+                if *observed_trust_class != expected_class {
+                    failures.push(format!(
+                        "{name}: trust_class {observed_trust_class:?} != expected {expected_class:?}"
+                    ));
+                }
+            }
+        }
+        ProbeResult::Unknown { reason, retryable } => {
+            if let Some(expected_reason) = &want.reason {
+                if reason != expected_reason {
+                    failures.push(format!(
+                        "{name}: reason {reason:?} != expected {expected_reason:?}"
+                    ));
+                }
+            }
+            if let Some(expected_retryable) = want.retryable {
+                if *retryable != expected_retryable {
+                    failures.push(format!(
+                        "{name}: retryable {retryable} != expected {expected_retryable}"
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some(expected_diagnostics) = &want.diagnostics {
+        let mut expected_codes = expected_diagnostics.clone();
+        expected_codes.sort_unstable();
+        expected_codes.dedup();
+        let got_codes = outcome.diagnostic_codes();
+        if got_codes != expected_codes {
             failures.push(format!(
-                "{name}: expected {} but got {got}: {:?}",
-                want.result, outcome.result
+                "{name}: diagnostics {:?} != expected {:?}",
+                codes_as_wire(&got_codes),
+                codes_as_wire(&expected_codes)
             ));
-            continue;
         }
+    }
 
-        // Invariant #7, restated for every fixture regardless of what it
-        // claims to test: an `unknown` expectation must never be
-        // satisfied by a `Match`, and the above equality is the only
-        // thing standing between those two.
-        if want.result == "unknown" {
-            assert!(
-                !matches!(outcome.result, ProbeResult::Match { .. }),
-                "{name}: fixture expected unknown; a Match here is an invariant-#7 violation"
-            );
-        }
-
-        match (&outcome.result, want.result.as_str()) {
-            (
-                ProbeResult::Match {
-                    observed_fp,
-                    observed_trust_class,
-                }
-                | ProbeResult::Drift {
-                    observed_fp,
-                    observed_trust_class,
-                },
-                _,
-            ) => {
-                if let Some(expected_fp) = &want.observed_fingerprint {
-                    if observed_fp != expected_fp {
-                        failures.push(format!(
-                            "{name}: observed_fingerprint {observed_fp} != expected {expected_fp}"
-                        ));
-                    }
-                }
-                if let Some(expected_class) = want.trust_class {
-                    if *observed_trust_class != expected_class {
-                        failures.push(format!(
-                            "{name}: trust_class {observed_trust_class:?} != expected {expected_class:?}"
-                        ));
-                    }
-                }
-            }
-            (ProbeResult::Unknown { reason, retryable }, _) => {
-                if let Some(expected_reason) = &want.reason {
-                    if reason != expected_reason {
-                        failures.push(format!(
-                            "{name}: reason {reason:?} != expected {expected_reason:?}"
-                        ));
-                    }
-                }
-                if let Some(expected_retryable) = want.retryable {
-                    if *retryable != expected_retryable {
-                        failures.push(format!(
-                            "{name}: retryable {retryable} != expected {expected_retryable}"
-                        ));
-                    }
-                }
-            }
-        }
-
-        if let Some(expected_diagnostics) = &want.diagnostics {
-            let mut expected_codes = expected_diagnostics.clone();
-            expected_codes.sort_unstable();
-            expected_codes.dedup();
-            let got_codes = outcome.diagnostic_codes();
-            if got_codes != expected_codes {
-                failures.push(format!(
-                    "{name}: diagnostics {:?} != expected {:?}",
-                    codes_as_wire(&got_codes),
-                    codes_as_wire(&expected_codes)
-                ));
-            }
-        }
-
-        if let Some(expected_requests) = want.requests {
-            if outcome.cost.requests != expected_requests {
-                failures.push(format!(
-                    "{name}: issued {} requests, expected {expected_requests}",
-                    outcome.cost.requests
-                ));
-            }
+    if let Some(expected_requests) = want.requests {
+        if outcome.cost.requests != expected_requests {
+            failures.push(format!(
+                "{name}: issued {} requests, expected {expected_requests}",
+                outcome.cost.requests
+            ));
         }
     }
 }
