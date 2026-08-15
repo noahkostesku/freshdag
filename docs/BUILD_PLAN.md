@@ -156,27 +156,31 @@ changes go through the owner or through a contract change.
   requesting a change file an issue and wait.
 - Cross-workstream refactors go through the `integration-engineer`.
 
-## 6. Immediate Next Steps
+## 6. Current wave
 
-If you are starting a session right now, the first four actions are:
+Wave 1 landed on `main` (commits `f564f4c` S0, `b1e1efe` S1,
+`26afd70` Phase B, `5cb280a` adversarial-review fixes; 103 test
+results green): canonical IR + domain model, file probe, Linux
+subprocess observer + macOS stub, certificate conformance fixtures,
+scenario harness skeleton, HTTP probe research memo.
 
-1. **S0** — land the IR event enums in `freshdag-core::ir`. Small,
-   focused, unblocks W5/W6.
-2. Once S0 lands, start W5 (file probe) and W6 (Linux observer
-   fsatrace) in parallel — they now have the enums they need to
-   compile.
-3. **S1** — land the remaining `freshdag-core` types
-   (`Dependency`, `Fingerprint`, `Validity`, `Artifact`,
-   `Computation`, `Certificate`).
-4. Once S1 lands, unlock W1 (Claude adapter), W2 (append-only store)
-   in parallel. W3 (derived graph) follows W2. W4 (engine) follows W3.
-   W7 (CLI) follows W4. W8 (fixtures) follows W7 for the driver but
-   the fixture *content* can be authored in parallel starting after
-   S1.
+**Wave 2 is the next implementation wave.** The full execution plan
+lives at `docs/prompts/wave-2.md` — it is a self-contained release-
+manager prompt covering Phase A (`ReasonCode` enum), then the
+parallel Phase B workstreams (W1 Claude adapter, W2 append-only
+store, W5.2 HTTPS probe, W6.2 coverage-manifest wire-up, W3 derived
+graph, W4 engine) with dependencies, verification requirements, and
+the adversarial-review triple at the end.
 
-The `release-manager` assigns owners to S0 and S1. Every other
-workstream is claimed by its subsystem owner per
-`docs/OWNERSHIP.md`.
+A fresh Claude Code session executes Wave 2 with:
+
+```
+Read CLAUDE.md and docs/prompts/wave-2.md, verify the actual
+repository state, then execute Wave 2 as the release-manager.
+```
+
+The `release-manager` assigns Phase A. Every parallel workstream is
+claimed by its subsystem owner per `docs/OWNERSHIP.md`.
 
 ## 6.1. Provisional-to-Stable Contract Transitions
 

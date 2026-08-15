@@ -53,6 +53,9 @@ Ownership is documented in `docs/OWNERSHIP.md`.
 6. `.claude/rules/` for the topic you are touching (architecture, git,
    testing, novelty).
 
+Release-managers additionally read `docs/prompts/` — implementation
+wave prompts live there.
+
 ## Contract-change Policy
 
 Modifying anything in `docs/contracts/` or the corresponding types in
