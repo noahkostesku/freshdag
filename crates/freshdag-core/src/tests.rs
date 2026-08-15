@@ -56,6 +56,20 @@ fn dependency_id_from_scheme_key_is_stable() {
     assert_eq!(c.0, "attio://company/acme");
 }
 
+#[test]
+fn dependency_id_from_scheme_key_prefix_check_is_exact() {
+    // Regression: previously used `key.starts_with(scheme)`, which
+    // would drop the prefix for e.g. ("file", "filesystem/x.md")
+    // because "filesystem" starts with "file". The check must include
+    // the `:` or `://` delimiter.
+    let dep = DependencyId::from_scheme_key("file", "filesystem/x.md");
+    assert_eq!(dep.0, "file://filesystem/x.md");
+
+    // `scheme:key` (single colon, no `//`) is also treated as already-formed.
+    let dep = DependencyId::from_scheme_key("scheme", "scheme:opaque");
+    assert_eq!(dep.0, "scheme:opaque");
+}
+
 // --------------------------------------------------------------------
 // TrustClass — rank, escalation, demotion
 // --------------------------------------------------------------------
@@ -151,6 +165,39 @@ fn fingerprint_unknown_token_rejected() {
 }
 
 #[test]
+fn fingerprint_unknown_rejected_case_insensitively() {
+    // Regression: case-sensitive match would let `UNKNOWN:x`, `Unknown:x`,
+    // etc. slip through as Custom fingerprints. Reject them all.
+    for variant in ["UNKNOWN:x", "Unknown:x", "unKnown:x", "UNKNOWN:UNKNOWN"] {
+        let err = variant.parse::<Fingerprint>().unwrap_err();
+        assert!(
+            matches!(err, FingerprintParseError::UnknownIsNotFingerprint),
+            "{variant} must be rejected; got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn fingerprint_empty_prefix_rejected() {
+    // Regression: `":something"` used to parse as Custom{payload:"something"}.
+    // Empty prefix is malformed, not a Custom fingerprint.
+    let err = ":something".parse::<Fingerprint>().unwrap_err();
+    assert!(matches!(err, FingerprintParseError::Malformed(_)));
+    // Same for double-colon at the start.
+    let err = "::x".parse::<Fingerprint>().unwrap_err();
+    assert!(matches!(err, FingerprintParseError::Malformed(_)));
+}
+
+#[test]
+#[should_panic(expected = "empty Fingerprint payload violates invariant #7")]
+fn fingerprint_new_with_empty_payload_panics_in_release() {
+    // Regression: previously this was `debug_assert!` which vanished in
+    // release builds. Now it is a plain `assert!` and panics
+    // unconditionally.
+    let _ = Fingerprint::new(FingerprintKind::Custom, "");
+}
+
+#[test]
 fn fingerprint_kind_survives_serialization() {
     // Two fingerprints with different kinds but the same string payload
     // are distinct (compare via full wire form).
@@ -215,8 +262,17 @@ fn dependency_round_trip_with_produced_by() {
 #[test]
 fn validity_all_exact_match_is_valid() {
     let verdicts = [
-        EdgeVerdict::Match(TrustClass::Exact),
-        EdgeVerdict::Match(TrustClass::Versioned),
+        EdgeVerdict::matched(
+            TrustClass::Exact,
+            Fingerprint::new(
+                FingerprintKind::ContentHash,
+                "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        ),
+        EdgeVerdict::matched(
+            TrustClass::Versioned,
+            Fingerprint::new(FingerprintKind::Version, "42"),
+        ),
     ];
     let keys = vec!["a".to_string(), "b".to_string()];
     let v = Validity::aggregate(&verdicts, &keys).unwrap();
@@ -227,8 +283,17 @@ fn validity_all_exact_match_is_valid() {
 #[test]
 fn validity_any_heuristic_caps_at_likely_valid() {
     let verdicts = [
-        EdgeVerdict::Match(TrustClass::Exact),
-        EdgeVerdict::Match(TrustClass::Heuristic),
+        EdgeVerdict::matched(
+            TrustClass::Exact,
+            Fingerprint::new(
+                FingerprintKind::ContentHash,
+                "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        ),
+        EdgeVerdict::matched(
+            TrustClass::Heuristic,
+            Fingerprint::new(FingerprintKind::Etag, "\"weak\""),
+        ),
     ];
     let keys = vec!["a".to_string(), "b".to_string()];
     let v = Validity::aggregate(&verdicts, &keys).unwrap();
@@ -243,8 +308,17 @@ fn validity_any_heuristic_caps_at_likely_valid() {
 #[test]
 fn validity_any_volatile_caps_at_likely_valid() {
     let verdicts = [
-        EdgeVerdict::Match(TrustClass::Exact),
-        EdgeVerdict::Match(TrustClass::Volatile),
+        EdgeVerdict::matched(
+            TrustClass::Exact,
+            Fingerprint::new(
+                FingerprintKind::ContentHash,
+                "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        ),
+        EdgeVerdict::matched(
+            TrustClass::Volatile,
+            Fingerprint::new(FingerprintKind::Custom, "vol"),
+        ),
     ];
     let keys = vec!["a".to_string(), "b".to_string()];
     let v = Validity::aggregate(&verdicts, &keys).unwrap();
@@ -254,7 +328,13 @@ fn validity_any_volatile_caps_at_likely_valid() {
 #[test]
 fn validity_any_drift_is_stale_regardless_of_others() {
     let verdicts = [
-        EdgeVerdict::Match(TrustClass::Exact),
+        EdgeVerdict::matched(
+            TrustClass::Exact,
+            Fingerprint::new(
+                FingerprintKind::ContentHash,
+                "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        ),
         EdgeVerdict::Drift,
         EdgeVerdict::Unknown,
     ];
@@ -267,7 +347,16 @@ fn validity_any_drift_is_stale_regardless_of_others() {
 
 #[test]
 fn validity_any_unknown_without_drift_is_unknown() {
-    let verdicts = [EdgeVerdict::Match(TrustClass::Exact), EdgeVerdict::Unknown];
+    let verdicts = [
+        EdgeVerdict::matched(
+            TrustClass::Exact,
+            Fingerprint::new(
+                FingerprintKind::ContentHash,
+                "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        ),
+        EdgeVerdict::Unknown,
+    ];
     let keys = vec!["a".to_string(), "b".to_string()];
     let v = Validity::aggregate(&verdicts, &keys).unwrap();
     assert_eq!(v.value, ValidityStatus::Unknown);
@@ -286,7 +375,16 @@ fn validity_empty_verdicts_is_unknown_not_valid() {
 
 #[test]
 fn validity_mismatched_lengths_errors() {
-    let v = Validity::aggregate(&[EdgeVerdict::Match(TrustClass::Exact)], &[]);
+    let v = Validity::aggregate(
+        &[EdgeVerdict::matched(
+            TrustClass::Exact,
+            Fingerprint::new(
+                FingerprintKind::ContentHash,
+                "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        )],
+        &[],
+    );
     assert!(matches!(
         v,
         Err(ValidityAggregationError::MismatchedLengths {
@@ -383,7 +481,7 @@ fn valid_baseline_cert() -> Certificate {
         schema: CERTIFICATE_SCHEMA_V0_1.to_string(),
         artifact: art,
         produced_by: ProducedBy {
-            computation_id: ComputationId::derive("recipe", "inputs", "v1").0,
+            computation_id: ComputationId::derive("recipe", "inputs", "v1"),
             recipe: Some("research-account".to_string()),
             recipe_hash: Some(sample_blake3()),
             adapter: "freshdag-adapter-claude/0.1.0".to_string(),
@@ -403,6 +501,7 @@ fn valid_baseline_cert() -> Certificate {
         observation_coverage: vec![CoverageEntry {
             producer: "freshdag-adapter-claude".to_string(),
             version: "0.1.0".to_string(),
+            emits: vec![],
             known_limitations: vec![],
         }],
     }
@@ -556,4 +655,121 @@ fn probe_result_unknown_is_distinct_from_match() {
     assert!(m_json.contains("Match"));
     assert!(u_json.contains("Unknown"));
     assert_ne!(m_json, u_json);
+}
+
+// --------------------------------------------------------------------
+// Certificate::check_coverage_deficit — the invariant #7 keystone at
+// the boundary between adapter+observer producers and the certificate.
+// --------------------------------------------------------------------
+
+fn bash_tool_invoked_event(producer: &str) -> crate::ir::IrEvent {
+    crate::ir::IrEvent {
+        event_id: uuid::Uuid::parse_str("018f5b52-4b8b-7a1a-9c2f-1a2b3c4d5e6f").unwrap(),
+        producer: producer.to_string(),
+        producer_version: "0.1.0".to_string(),
+        session_id: "s".to_string(),
+        computation_id: None,
+        parent_id: None,
+        causal_inputs: None,
+        ts: ts(),
+        kind: crate::ir::EventKind::ToolInvoked,
+        payload: serde_json::json!({
+            "tool_name": "bash",
+            "tool_kind": "bash",
+            "tool_input": { "command": "cat notes.md" },
+        }),
+    }
+}
+
+#[test]
+fn coverage_deficit_flags_valid_cert_with_bash_and_no_fs_observer() {
+    // Valid cert; bash tool.invoked; observation_coverage has ONLY the
+    // adapter (no observer producer, no fs.* coverage). Contract
+    // §Coverage-Deficit demands CoverageDeficit.
+    let cert = valid_baseline_cert();
+    let events = vec![bash_tool_invoked_event("freshdag-adapter-claude")];
+    let err = cert.check_coverage_deficit(&events).unwrap_err();
+    match err {
+        InvariantError::CoverageDeficit { tool_kind } => assert_eq!(tool_kind, "bash"),
+        other => panic!("expected CoverageDeficit(bash), got {other:?}"),
+    }
+}
+
+#[test]
+fn coverage_deficit_passes_when_observer_declares_fs_coverage() {
+    let mut cert = valid_baseline_cert();
+    // Add an observer coverage entry declaring fs.read + fs.write.
+    cert.observation_coverage.push(CoverageEntry {
+        producer: "freshdag-observer-fsatrace".to_string(),
+        version: "0.1.0".to_string(),
+        emits: vec![
+            crate::ir::EventKindPattern::from("fs.read"),
+            crate::ir::EventKindPattern::from("fs.write"),
+        ],
+        known_limitations: vec![],
+    });
+    let events = vec![bash_tool_invoked_event("freshdag-adapter-claude")];
+    cert.check_coverage_deficit(&events).unwrap();
+}
+
+#[test]
+fn coverage_deficit_ignores_bash_when_status_not_valid() {
+    // If the cert already claims stale/unknown/likely-valid, the
+    // coverage-deficit rule is moot — the status is already conservative.
+    let mut cert = valid_baseline_cert();
+    cert.status.value = ValidityStatus::Stale;
+    cert.status.reasons = vec![ValidityReason {
+        dependency_key: cert.depends_on[0].key.clone(),
+        reason: "drift".to_string(),
+    }];
+    let events = vec![bash_tool_invoked_event("freshdag-adapter-claude")];
+    cert.check_coverage_deficit(&events).unwrap();
+}
+
+#[test]
+fn coverage_deficit_flags_missing_producer_even_on_non_valid_cert() {
+    // Producer-membership rule runs regardless of status.
+    let mut cert = valid_baseline_cert();
+    cert.status.value = ValidityStatus::Stale;
+    cert.status.reasons = vec![ValidityReason {
+        dependency_key: cert.depends_on[0].key.clone(),
+        reason: "drift".to_string(),
+    }];
+    let events = vec![bash_tool_invoked_event("some-unregistered-producer")];
+    let err = cert.check_coverage_deficit(&events).unwrap_err();
+    match err {
+        InvariantError::ProducerMissingFromCoverage { producer } => {
+            assert_eq!(producer, "some-unregistered-producer");
+        }
+        other => panic!("expected ProducerMissingFromCoverage, got {other:?}"),
+    }
+}
+
+#[test]
+fn coverage_deficit_flags_task_kind_too() {
+    let cert = valid_baseline_cert();
+    let mut ev = bash_tool_invoked_event("freshdag-adapter-claude");
+    // Rewrite the payload to be a task, not a bash invocation.
+    ev.payload = serde_json::json!({
+        "tool_name": "delegate-research",
+        "tool_kind": "task",
+        "tool_input": { "prompt": "..." },
+    });
+    let err = cert.check_coverage_deficit(&[ev]).unwrap_err();
+    match err {
+        InvariantError::CoverageDeficit { tool_kind } => assert_eq!(tool_kind, "task"),
+        other => panic!("expected CoverageDeficit(task), got {other:?}"),
+    }
+}
+
+#[test]
+fn coverage_deficit_ignores_builtin_and_mcp_tool_kinds() {
+    let cert = valid_baseline_cert();
+    let mut ev = bash_tool_invoked_event("freshdag-adapter-claude");
+    ev.payload = serde_json::json!({
+        "tool_name": "mcp/attio/get-record",
+        "tool_kind": "mcp",
+        "tool_input": { "record_id": "acme" },
+    });
+    cert.check_coverage_deficit(&[ev]).unwrap();
 }

@@ -58,6 +58,8 @@ fn invariant_error_variant_name(err: &InvariantError) -> &'static str {
         InvariantError::MissingReasons { .. } => "MissingReasons",
         InvariantError::NakedVolatile(_) => "NakedVolatile",
         InvariantError::EmptyObservationCoverage => "EmptyObservationCoverage",
+        InvariantError::CoverageDeficit { .. } => "CoverageDeficit",
+        InvariantError::ProducerMissingFromCoverage { .. } => "ProducerMissingFromCoverage",
     }
 }
 

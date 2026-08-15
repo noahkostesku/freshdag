@@ -59,11 +59,13 @@ pub struct Fingerprint {
 impl Fingerprint {
     /// Construct a fingerprint. Payload MUST be non-empty — an empty
     /// payload would be indistinguishable from "unknown," which
-    /// invariant #7 rules out.
+    /// invariant #7 rules out. Panics on empty payload in ALL build
+    /// modes (not `debug_assert!`); an empty payload here would be a
+    /// silent invariant violation.
     #[must_use]
     pub fn new(kind: FingerprintKind, payload: impl Into<String>) -> Self {
         let payload = payload.into();
-        debug_assert!(
+        assert!(
             !payload.is_empty(),
             "empty Fingerprint payload violates invariant #7"
         );
@@ -91,15 +93,25 @@ impl FromStr for Fingerprint {
         let (prefix, rest) = s
             .split_once(':')
             .ok_or_else(|| FingerprintParseError::Malformed(s.to_string()))?;
+        // Empty prefix (":something") is malformed — not a Custom
+        // fingerprint. Same for empty payload.
+        if prefix.is_empty() {
+            return Err(FingerprintParseError::Malformed(s.to_string()));
+        }
         if rest.is_empty() {
             return Err(FingerprintParseError::Empty);
+        }
+        // "unknown" (any casing) MUST NOT parse — invariant #7. Compare
+        // case-insensitively so `UNKNOWN:x`, `Unknown:x`, etc. are
+        // rejected too.
+        if prefix.eq_ignore_ascii_case("unknown") {
+            return Err(FingerprintParseError::UnknownIsNotFingerprint);
         }
         let (kind, payload) = match prefix {
             "blake3" | "sha256" => (FingerprintKind::ContentHash, s.to_string()),
             "version" => (FingerprintKind::Version, rest.to_string()),
             "etag" => (FingerprintKind::Etag, rest.to_string()),
             "mtime" => (FingerprintKind::Mtime, rest.to_string()),
-            "unknown" => return Err(FingerprintParseError::UnknownIsNotFingerprint),
             // "custom" and any unknown-but-parseable prefix fall through
             // to the Custom variant so probes may define new schemes
             // without a code change here.

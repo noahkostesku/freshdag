@@ -33,10 +33,17 @@ impl DependencyId {
     /// v0 identity is the wire-form string `scheme://key` (or `scheme(key)`
     /// for scheme-less forms like `web.search(...)`). This is what appears
     /// in `depends_on[].key` on certificates — see certificate contract.
+    ///
+    /// If `key` is already in `scheme://…` (or `scheme:…`) form, it is
+    /// returned verbatim. The check is against the full scheme prefix
+    /// including the `:` delimiter — not just `starts_with(scheme)` —
+    /// so `from_scheme_key("file", "filesystem/x")` correctly returns
+    /// `"file://filesystem/x"`, not `"filesystem/x"`.
     #[must_use]
     pub fn from_scheme_key(scheme: &str, key: &str) -> Self {
-        if key.starts_with(scheme) {
-            // key is already in wire form (e.g., "file:///abs/path")
+        let with_slashes = format!("{scheme}://");
+        let with_colon = format!("{scheme}:");
+        if key.starts_with(&with_slashes) || key.starts_with(&with_colon) {
             Self(key.to_string())
         } else {
             Self(format!("{scheme}://{key}"))

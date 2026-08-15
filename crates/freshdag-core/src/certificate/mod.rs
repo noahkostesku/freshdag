@@ -14,8 +14,9 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::artifact::Artifact;
+use crate::computation::ComputationId;
 use crate::dependency::{Dependency, TrustClass, ValidityReason, ValidityStatus};
-use crate::ir::{CoverageManifest, Hash};
+use crate::ir::{CoverageManifest, EventKind, EventKindPattern, Hash, IrEvent};
 
 /// Schema identifier expected on every v0.1 certificate.
 pub const CERTIFICATE_SCHEMA_V0_1: &str = "freshdag.certificate/v0.1";
@@ -50,8 +51,11 @@ pub struct Certificate {
 /// The `produced_by` subobject.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProducedBy {
-    /// Stable computation identifier.
-    pub computation_id: String,
+    /// Stable computation identifier. Typed as [`ComputationId`] rather
+    /// than a bare `String` so certificates cannot silently carry an
+    /// unparseable id and the deterministic-derivation guarantee from
+    /// execution-ir.md §Event Envelope is preserved end-to-end.
+    pub computation_id: ComputationId,
     /// Recipe name (human-readable).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recipe: Option<String>,
@@ -98,13 +102,20 @@ pub struct Status {
 /// One row of the `observation_coverage` list.
 ///
 /// The full [`CoverageManifest`] lives elsewhere; on the certificate we
-/// keep only the fields consumers need for silence-interpretation.
+/// keep the fields consumers need for silence-interpretation *and* the
+/// `emits` patterns the engine needs to compute coverage deficits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoverageEntry {
     /// Producer identity (matches `IrEvent::producer`).
     pub producer: String,
     /// Producer semver.
     pub version: String,
+    /// Event-kind patterns this producer emits. Populated from the
+    /// producer's [`CoverageManifest`]. Required for
+    /// [`Certificate::check_coverage_deficit`] to be checkable from
+    /// the certificate + event stream alone.
+    #[serde(default)]
+    pub emits: Vec<EventKindPattern>,
     /// Human-readable known limitations that surface to end users.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub known_limitations: Vec<String>,
@@ -115,17 +126,46 @@ impl From<&CoverageManifest> for CoverageEntry {
         Self {
             producer: m.producer.clone(),
             version: m.version.clone(),
+            emits: m.emits.clone(),
             known_limitations: m.known_limitations.clone(),
         }
     }
 }
 
-/// Errors from [`Certificate::check_invariants`].
+impl CoverageEntry {
+    /// Does this coverage entry declare it emits the given event kind?
+    #[must_use]
+    pub fn covers(&self, kind: EventKind) -> bool {
+        self.emits.iter().any(|p| p.matches(kind))
+    }
+}
+
+/// Errors from [`Certificate::check_invariants`] and
+/// [`Certificate::check_coverage_deficit`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum InvariantError {
     /// Schema field didn't match the expected string for this version.
     #[error("schema field is `{0}`; expected `{CERTIFICATE_SCHEMA_V0_1}`")]
     SchemaMismatch(String),
+    /// A computation invoked `bash` or `task` but no observer producer
+    /// in `observation_coverage` declares fs.* coverage. Per
+    /// certificate-contract §Coverage-Deficit, the certificate MUST
+    /// NOT be `valid` under this condition.
+    #[error(
+        "coverage deficit: tool.invoked tool_kind={tool_kind} with no producer \
+         in observation_coverage declaring fs.* coverage"
+    )]
+    CoverageDeficit {
+        /// The tool kind that triggered the rule (`bash` or `task`).
+        tool_kind: String,
+    },
+    /// An event in the IR stream names a producer that is not present
+    /// in `observation_coverage`. Anti-pattern from certificate contract.
+    #[error("producer `{producer}` emitted events but is not in observation_coverage")]
+    ProducerMissingFromCoverage {
+        /// The missing producer's identity.
+        producer: String,
+    },
     /// Invariant #7 keystone: `Valid` requires every dependency at
     /// `Exact` or `Versioned` trust class.
     #[error(
@@ -219,6 +259,71 @@ impl Certificate {
             }
         }
 
+        Ok(())
+    }
+
+    /// Enforce the certificate contract's §Coverage-Deficit rule
+    /// against an IR event stream. This is the rule that turns
+    /// invariant #7 into a machine-checked property at the boundary
+    /// between adapter+observer producers and the certificate.
+    ///
+    /// Rules (per contract):
+    ///
+    /// - Every producer that emitted an event MUST appear in
+    ///   `observation_coverage` (anti-pattern from certificate
+    ///   contract). Enforced regardless of status.
+    /// - If `status.value == Valid` and any `tool.invoked` of kind
+    ///   `bash|task` occurred, at least one producer in
+    ///   `observation_coverage` MUST declare fs.* coverage (via its
+    ///   `emits` list). Otherwise the certificate is a coverage
+    ///   deficit and MUST NOT be `valid`. This is why v0 on macOS
+    ///   (StubObserver, zero fs coverage) reports `unknown` — not
+    ///   `valid` — on any computation that invoked Bash.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvariantError::CoverageDeficit`] on a Valid cert with an
+    ///   uncovered bash/task invocation.
+    /// - [`InvariantError::ProducerMissingFromCoverage`] on any event
+    ///   whose producer is absent from `observation_coverage`.
+    pub fn check_coverage_deficit(&self, events: &[IrEvent]) -> Result<(), InvariantError> {
+        // Producer-membership check regardless of status.
+        let declared: std::collections::HashSet<&str> = self
+            .observation_coverage
+            .iter()
+            .map(|c| c.producer.as_str())
+            .collect();
+        for ev in events {
+            if !declared.contains(ev.producer.as_str()) {
+                return Err(InvariantError::ProducerMissingFromCoverage {
+                    producer: ev.producer.clone(),
+                });
+            }
+        }
+
+        // Coverage-deficit rule only bites when the cert claims Valid.
+        if !matches!(self.status.value, ValidityStatus::Valid) {
+            return Ok(());
+        }
+
+        let has_fs_covered_observer = self
+            .observation_coverage
+            .iter()
+            .any(|c| c.covers(EventKind::FsRead) || c.covers(EventKind::FsWrite));
+
+        for ev in events {
+            if !matches!(ev.kind, EventKind::ToolInvoked) {
+                continue;
+            }
+            let Some(tool_kind) = ev.payload.get("tool_kind").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if matches!(tool_kind, "bash" | "task") && !has_fs_covered_observer {
+                return Err(InvariantError::CoverageDeficit {
+                    tool_kind: tool_kind.to_string(),
+                });
+            }
+        }
         Ok(())
     }
 

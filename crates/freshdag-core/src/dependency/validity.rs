@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::fingerprint::Fingerprint;
 use super::trust::TrustClass;
 
 /// The four possible values for a `Certificate.status.value`.
@@ -56,10 +57,24 @@ impl ValidityStatus {
 /// one of these three via
 /// [`ProbeResult`](crate::probe::ProbeResult) which the engine converts
 /// to an `EdgeVerdict` combining probe result and recorded trust class.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Match` carries the *observed* fingerprint and trust class alongside
+/// the *recorded* trust class so downstream logic (anti-thrash escalation
+/// per probe-contract §Anti-thrash Protocol, writing the new fingerprint
+/// back into the store) has the data without a follow-up probe call.
+/// Widening this shape here avoids a public-API break when Wave 2's
+/// engine lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EdgeVerdict {
     /// Recorded fingerprint still matches.
-    Match(TrustClass),
+    Match {
+        /// The recorded trust class.
+        recorded_trust_class: TrustClass,
+        /// The observed trust class (may differ if the probe escalates).
+        observed_trust_class: TrustClass,
+        /// The observed fingerprint from the probe.
+        observed_fp: Fingerprint,
+    },
     /// Recorded fingerprint no longer matches.
     Drift,
     /// Could not verify (probe failure, TTL expired, coverage deficit).
@@ -67,19 +82,40 @@ pub enum EdgeVerdict {
 }
 
 impl EdgeVerdict {
+    /// Construct a `Match` from just a trust class + observed fingerprint,
+    /// treating recorded and observed trust as the same.
+    #[must_use]
+    pub fn matched(trust_class: TrustClass, observed_fp: Fingerprint) -> Self {
+        Self::Match {
+            recorded_trust_class: trust_class,
+            observed_trust_class: trust_class,
+            observed_fp,
+        }
+    }
+
     /// Convert an edge verdict to its `ValidityStatus` contribution.
     ///
     /// This encodes the trust-class table from `ARCHITECTURE.md §7`:
     /// `Exact|Versioned + Match => Valid`; `Heuristic|Volatile + Match
     /// => LikelyValid`; anything `Drift => Stale`; anything `Unknown =>
     /// Unknown`.
+    ///
+    /// The verdict's status contribution uses the *recorded* trust
+    /// class — escalations require multiple observations before they
+    /// change the recorded class (anti-thrash), so a single Match at a
+    /// higher observed trust class does not immediately upgrade the
+    /// artifact's status.
     #[must_use]
-    pub const fn to_status(self) -> ValidityStatus {
+    pub const fn to_status(&self) -> ValidityStatus {
         match self {
-            Self::Match(TrustClass::Exact | TrustClass::Versioned) => ValidityStatus::Valid,
-            Self::Match(TrustClass::Heuristic | TrustClass::Volatile) => {
-                ValidityStatus::LikelyValid
-            }
+            Self::Match {
+                recorded_trust_class: TrustClass::Exact | TrustClass::Versioned,
+                ..
+            } => ValidityStatus::Valid,
+            Self::Match {
+                recorded_trust_class: TrustClass::Heuristic | TrustClass::Volatile,
+                ..
+            } => ValidityStatus::LikelyValid,
             Self::Drift => ValidityStatus::Stale,
             Self::Unknown => ValidityStatus::Unknown,
         }
@@ -166,15 +202,24 @@ impl Validity {
                     dependency_key: key.clone(),
                     reason: "probe_unknown".to_string(),
                 }),
-                EdgeVerdict::Match(TrustClass::Heuristic) => reasons.push(ValidityReason {
+                EdgeVerdict::Match {
+                    recorded_trust_class: TrustClass::Heuristic,
+                    ..
+                } => reasons.push(ValidityReason {
                     dependency_key: key.clone(),
                     reason: "trust_class_heuristic_caps_at_likely_valid".to_string(),
                 }),
-                EdgeVerdict::Match(TrustClass::Volatile) => reasons.push(ValidityReason {
+                EdgeVerdict::Match {
+                    recorded_trust_class: TrustClass::Volatile,
+                    ..
+                } => reasons.push(ValidityReason {
                     dependency_key: key.clone(),
                     reason: "trust_class_volatile_caps_at_likely_valid".to_string(),
                 }),
-                EdgeVerdict::Match(TrustClass::Exact | TrustClass::Versioned) => {}
+                EdgeVerdict::Match {
+                    recorded_trust_class: TrustClass::Exact | TrustClass::Versioned,
+                    ..
+                } => {}
             }
         }
         // Only surface reasons for non-Valid statuses.

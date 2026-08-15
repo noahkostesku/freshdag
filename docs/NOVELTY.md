@@ -50,6 +50,10 @@ public novelty claim and treated as living rather than final.
 | **W3C PROV / PROV-O** | Provenance metamodel; cited in recent LLM-provenance work. | Formal vocabulary reviewers expect us to relate to. | Spec, not system. | Low (must-cite) | https://www.w3.org/TR/prov-overview/ |
 | **FreshLLMs / FreshQA / temporal-RAG line** | Detect and repair stale factual answers via retrieval. | Shares "fresh" and the intuition that LLM outputs decay. | Answer-level via re-retrieval; no artifact graph; no minimal recompute. | High (naming + reviewer conflation) | https://arxiv.org/abs/2310.03214 |
 | **Cognition / Devin / Factory / Poolside** | Long-lived agent sessions with artifact stores. | Same problem surface. | No public freshness model. | Medium (they could ship it) | https://cognition.ai |
+| **Bauplan / Nessie / Iceberg catalogs** | Table-version-token-driven staleness on Iceberg tables. | Direct `versioned`-trust-class analog for the data-lake ecosystem. | Table-scoped; not agent-aware; no trust-class typing beyond version tokens. | High | https://www.bauplanlabs.com ; https://projectnessie.org |
+| **W3C Verifiable Credentials `credentialStatus`** | Predicate-attached-to-artifact with explicit revocation/refresh mechanism. | Conceptually a `freshness` facet in a different ecosystem. | Not agent-aware; not a runtime system. | Medium | https://www.w3.org/TR/vc-data-model-2.0/ |
+| **OPA / Rego policy over OpenLineage events** | Policy-driven lineage validation. | The "just write a Rego policy over your lineage store" attack — must pre-empt. | No trust-class typing; no coverage-deficit rule; policy runs after the fact. | Medium (rhetorical) | https://openlineage.io/docs/integrations/opa |
+| **`uv.lock` / `pip-audit` / `npm overrides` freshness annotations** | Per-dependency staleness metadata in package ecosystems. | Not agent-aware, but reviewers will point at them. | Package-scoped; static; no probes. | Low | https://docs.astral.sh/uv/reference/settings/ |
 
 Systems flagged for follow-up verification (memos could not confirm they
 exist as distinct named projects; see §5): **AgentTrails, AgentFlow
