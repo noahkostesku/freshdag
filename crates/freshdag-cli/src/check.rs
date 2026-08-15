@@ -6,15 +6,25 @@
 //! `freshdag-engine`; this module only decides how to say it and what
 //! to exit with.
 //!
-//! # Read-only by default
+//! # `check` is read-only, and deliberately so for now
 //!
 //! `Engine::check` hands back the `probe.checked` and `diagnostic`
-//! events the check itself generated, and the engine's contract says
-//! "the caller appends these to the log". The CLI does so only under
-//! `--record`. A CI job checking out a read-only tree and asking "may I
-//! reuse this?" should not have to take a write lock on the store to
-//! get an answer, and a query that mutates by default is a surprise.
-//! `--record` is how an operator asks for the wiring.
+//! events the check itself generated, and the engine's own
+//! documentation says "the caller appends these to the log". The CLI
+//! does **not**, in this revision.
+//!
+//! Appending them is not currently sound to do from here. The engine
+//! emits those events under producer `freshdag-engine` and synthesizes
+//! its own `observation_coverage` entry in memory, but nothing
+//! registers a coverage manifest for it in the store. Replaying a log
+//! that contains them therefore produces
+//! `producer-missing-from-coverage`, which caps the status at
+//! `unknown`: recording a check would turn a `valid` artifact into an
+//! `unknown` one on the next check. It fails in the safe direction,
+//! but it is still wrong, and closing it means the engine publishing
+//! its coverage manifest — an engine API change, not a CLI one. Until
+//! then `check` is a pure query, which is also what a CI job running
+//! against a read-only checkout wants.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -25,7 +35,7 @@ use freshdag_core::certificate::Certificate;
 use freshdag_core::ir::{EventKind, IrEvent};
 use freshdag_engine::{Engine, EngineError, ProbeRegistry};
 use freshdag_probes::{FileProbe, HttpsProbe};
-use freshdag_store::{AppendOutcome, Store, StoreError, LOG_FILE_NAME};
+use freshdag_store::{Store, StoreError, LOG_FILE_NAME};
 
 use crate::exit::Exit;
 
@@ -144,14 +154,16 @@ pub struct Checked {
 /// # Errors
 ///
 /// Any [`CheckError`]; every one exits `> 2`.
-pub fn run(store_root: &Path, artifact: &str, record: bool) -> Result<Checked, CheckError> {
+pub fn run(store_root: &Path, artifact: &str) -> Result<Checked, CheckError> {
+    // Checked before `Store::open`, which would otherwise create the
+    // directory: a query must not fabricate the thing it queries.
     if !store_root.join(LOG_FILE_NAME).is_file() {
         return Err(CheckError::NoStore {
             path: store_root.to_path_buf(),
         });
     }
 
-    let mut store = Store::open(store_root)?;
+    let store = Store::open(store_root)?;
     let events = store.read_log()?;
     let artifact_id = resolve(&events, artifact)?;
 
@@ -167,18 +179,6 @@ pub fn run(store_root: &Path, artifact: &str, record: bool) -> Result<Checked, C
         .build();
 
     let outcome = engine.check(&artifact_id).map_err(CheckError::Engine)?;
-
-    if record {
-        for result in store.append_all(&outcome.events)? {
-            if let AppendOutcome::DroppedNewest { total_dropped } = result {
-                warnings.push(format!(
-                    "the store dropped an event under back-pressure \
-                     ({total_dropped} dropped so far); the log is incomplete"
-                ));
-            }
-        }
-        store.sync()?;
-    }
 
     Ok(Checked {
         certificate: outcome.certificate,

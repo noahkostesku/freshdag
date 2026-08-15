@@ -499,6 +499,40 @@ fn likely_valid_is_not_reusable_without_an_explicit_opt_in() {
 }
 
 #[test]
+fn check_does_not_mutate_the_store() {
+    // `check` is a query. It is also the thing a CI job runs against a
+    // read-only checkout, and the thing a user runs twice in a row
+    // expecting the same answer.
+    let scenario = Scenario::new("read-only")
+        .read("ICP.md", "ideal customer profile v3\n")
+        .build();
+    let log = scenario.store_dir.join("events.jsonl");
+    let coverage = scenario.store_dir.join("coverage.jsonl");
+    let before = (
+        std::fs::read(&log).expect("read log"),
+        std::fs::read(&coverage).expect("read coverage"),
+    );
+
+    let (first, _) = scenario.check(&[]);
+    let (second, _) = scenario.check(&[]);
+    assert_eq!(first, second, "two identical checks disagreed");
+
+    let after = (
+        std::fs::read(&log).expect("read log"),
+        std::fs::read(&coverage).expect("read coverage"),
+    );
+    assert!(before.0 == after.0, "`check` appended to the canonical log");
+    assert!(
+        before.1 == after.1,
+        "`check` wrote to the coverage registry"
+    );
+    assert!(
+        !scenario.store_dir.join("derived").exists(),
+        "`check` materialized derived state; it derives in memory"
+    );
+}
+
+#[test]
 fn a_missing_store_is_a_tool_error_not_a_verdict() {
     let root = target_tmp().join("no-store");
     let _ = std::fs::remove_dir_all(&root);

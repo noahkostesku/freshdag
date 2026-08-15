@@ -77,12 +77,6 @@ struct CheckArgs {
     /// tool's.
     #[arg(long)]
     accept_likely_valid: bool,
-
-    /// Append the `probe.checked` and `diagnostic` events this check
-    /// produced to the log. Off by default, so `check` is a read-only
-    /// query.
-    #[arg(long)]
-    record: bool,
 }
 
 fn main() {
@@ -121,7 +115,7 @@ fn run() -> i32 {
 }
 
 fn check_command(args: &CheckArgs) -> Exit {
-    let checked = match check::run(&args.store, &args.artifact, args.record) {
+    let checked = match check::run(&args.store, &args.artifact) {
         Ok(checked) => checked,
         Err(err) => {
             eprintln!("freshdag check: {err}");
