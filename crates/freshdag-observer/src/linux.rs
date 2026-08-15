@@ -20,6 +20,12 @@
 //! - Linux without `fsatrace` on `$PATH` →
 //!   [`ObserverError::BackendMissing`].
 //!
+//! The coverage manifest degrades with the backend: off-platform,
+//! [`FsatraceObserver::coverage`] declares `emits: []` rather than
+//! `fs.read`/`fs.write`, because consumers compute coverage deficits
+//! from `emits` and an off-platform `fs.*` claim would certify
+//! unobserved subprocess I/O as covered (invariant #7).
+//!
 //! The workspace compiles on macOS; we simply cannot run
 //! `FsatraceObserver::observe` there. Tests that need to exercise the
 //! observer trait use [`crate::replay::ScriptedObserver`], which is
@@ -29,7 +35,6 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, ProducerRole};
-use serde::Serialize;
 use serde_json::json;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -81,9 +86,52 @@ impl FsatraceObserver {
 }
 
 impl Observer for FsatraceObserver {
+    /// Coverage this backend delivers **on the platform it is running
+    /// on**.
+    ///
+    /// On non-Linux targets [`Observer::observe`] always returns
+    /// [`ObserverError::NotSupportedOnPlatform`], so this backend emits
+    /// nothing there. Declaring `fs.read`/`fs.write` anyway would be
+    /// fabricated coverage: consumers read `emits` (not `platforms`)
+    /// when they compute the certificate contract's coverage deficit,
+    /// so an off-platform manifest that still claims `fs.*` would let a
+    /// `bash` invocation certify as `valid` with zero observation
+    /// behind it. That is precisely the invariant #7 violation the
+    /// coverage manifest exists to prevent, so the manifest degrades
+    /// with the backend.
     fn coverage(&self) -> CoverageManifest {
         let mut capabilities: std::collections::BTreeMap<String, serde_json::Value> =
             std::collections::BTreeMap::new();
+        let mut partial: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+
+        if !cfg!(target_os = "linux") {
+            for k in [
+                "fs.read",
+                "fs.write",
+                "fs.rename",
+                "fs.stat",
+                "fs.dirlist",
+                "proc.spawn",
+                "net.connect",
+            ] {
+                capabilities.insert(k.to_string(), json!(false));
+            }
+            return CoverageManifest {
+                producer: "freshdag-observer-fsatrace".to_string(),
+                version: self.version.clone(),
+                platforms: vec!["linux-x86_64".to_string(), "linux-arm64".to_string()],
+                emits: vec![],
+                partial,
+                capabilities,
+                known_limitations: vec![format!(
+                    "fsatrace is Linux-only; current target is {} — this backend \
+                     emits nothing here and declares no coverage",
+                    std::env::consts::OS
+                )],
+            };
+        }
+
         capabilities.insert("fs.read".to_string(), json!(true));
         capabilities.insert("fs.write".to_string(), json!(true));
         capabilities.insert("fs.rename".to_string(), json!(false));
@@ -97,6 +145,26 @@ impl Observer for FsatraceObserver {
         );
         capabilities.insert("mmap_reads".to_string(), json!("not-yet-covered"));
 
+        // `emits` says "this kind can appear"; `partial` says "and its
+        // absence still does not mean nothing happened." Both fs kinds
+        // are genuinely partial today (observer-contract §Correctness
+        // Pitfalls), so declaring them without these notes would
+        // overclaim.
+        partial.insert(
+            "fs.read".to_string(),
+            "mmap reads bypass LD_PRELOAD interception and are not emitted \
+             (observer-contract §Correctness Pitfalls #2); statically linked or \
+             raw-syscall processes are invisible"
+                .to_string(),
+        );
+        partial.insert(
+            "fs.write".to_string(),
+            "rename-atomic writes are emitted against the temporary path only; the \
+             synthetic fs.write at the rename target required by observer-contract \
+             §Required Behavior #3 is not yet implemented"
+                .to_string(),
+        );
+
         CoverageManifest {
             producer: "freshdag-observer-fsatrace".to_string(),
             version: self.version.clone(),
@@ -106,12 +174,15 @@ impl Observer for FsatraceObserver {
                 EventKindPattern::from("fs.read"),
                 EventKindPattern::from("fs.write"),
             ],
-            partial: std::collections::BTreeMap::new(),
+            partial,
             capabilities,
             known_limitations: vec![
                 "glibc only; musl targets require strace fallback".to_string(),
                 "W6.1 only emits fs.read and fs.write; renames/mmap/stat land later".to_string(),
                 "cannot observe processes that fork before LD_PRELOAD attaches".to_string(),
+                "fsatrace delete (`d`) and query (`q`) trace ops are parsed but dropped; \
+                 no fs.unlink / fs.stat events are emitted"
+                    .to_string(),
             ],
         }
     }
@@ -262,8 +333,3 @@ fn which(bin: &str) -> Option<PathBuf> {
     }
     None
 }
-
-// unused-only-on-non-linux warning silencer
-#[allow(dead_code)]
-#[derive(Serialize)]
-struct _ForceSerdeJsonUsage;

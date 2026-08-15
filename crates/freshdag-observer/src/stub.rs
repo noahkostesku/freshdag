@@ -13,7 +13,7 @@
 
 use std::process::{Command, Stdio};
 
-use freshdag_core::ir::{CoverageManifest, EventKindPattern, ProducerRole};
+use freshdag_core::ir::{CoverageManifest, ProducerRole};
 
 use crate::observer::{CommandInvocation, ObservationRun, Observer, ObserverError};
 
@@ -87,12 +87,4 @@ impl Observer for StubObserver {
             events: vec![],
         })
     }
-}
-
-// Keep the pattern type used for parity with real observers (helps the
-// module compile whether or not the coverage manifest ever populates
-// its `emits` list).
-#[allow(dead_code)]
-fn _emit_pattern_placeholder() -> EventKindPattern {
-    EventKindPattern::from("fs.*")
 }

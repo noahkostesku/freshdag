@@ -6,6 +6,14 @@
 //! subprocesses, or filesystem state. Adversarial fixtures (rename
 //! dance, mmap-pessimistic reads, symlink swaps) can be encoded here
 //! before the real Linux backend supports them.
+//!
+//! The coverage manifest a scripted run publishes is a first-class
+//! part of the double: [`ScriptedObserver::zero_coverage`] and
+//! [`ScriptedObserver::full_fs_coverage`] are the two poles the
+//! certificate contract's §Coverage-Deficit rule discriminates
+//! between. Pick deliberately — a test that wants "this producer saw
+//! nothing" but reaches for the full-coverage manifest passes
+//! vacuously.
 
 use freshdag_core::ir::{CoverageManifest, EventKindPattern, IrEvent, ProducerRole};
 
@@ -52,10 +60,46 @@ impl ScriptedObserver {
         self
     }
 
-    /// A convenience "empty" coverage manifest for tests that don't
-    /// care about the coverage side of the observation.
+    /// A manifest that declares **no coverage at all** (`emits: []`).
+    ///
+    /// This is the manifest to reach for when a test needs a producer
+    /// that admits it saw nothing: it models the macOS/no-observer
+    /// posture, and it is what makes the certificate contract's
+    /// §Coverage-Deficit rule bite (invariant #7 — silence from a
+    /// producer that declares no coverage is not evidence of absence).
+    ///
+    /// Pairs with [`ScriptedObserver::full_fs_coverage`]. The two are
+    /// deliberately named for what they claim, because a test that
+    /// picks the wrong one passes vacuously.
     #[must_use]
-    pub fn empty_coverage(producer: &str) -> CoverageManifest {
+    pub fn zero_coverage(producer: &str) -> CoverageManifest {
+        CoverageManifest {
+            producer: producer.to_string(),
+            version: "test".to_string(),
+            platforms: vec!["any".to_string()],
+            emits: vec![],
+            partial: std::collections::BTreeMap::new(),
+            capabilities: std::collections::BTreeMap::new(),
+            known_limitations: vec![
+                "scripted test double".to_string(),
+                "declares zero coverage: any silence from this producer is uninterpretable"
+                    .to_string(),
+            ],
+        }
+    }
+
+    /// A manifest that declares **full filesystem coverage**
+    /// (`emits: ["fs.*"]`).
+    ///
+    /// Use this when a test needs a producer that satisfies the
+    /// certificate contract's §Coverage-Deficit obligation for a
+    /// `bash`/`task` invocation. It claims more than any real v0
+    /// backend delivers — that is the point; it is a test double, and
+    /// no shipped observer returns this manifest.
+    ///
+    /// Pairs with [`ScriptedObserver::zero_coverage`].
+    #[must_use]
+    pub fn full_fs_coverage(producer: &str) -> CoverageManifest {
         CoverageManifest {
             producer: producer.to_string(),
             version: "test".to_string(),
@@ -64,7 +108,10 @@ impl ScriptedObserver {
             emits: vec![EventKindPattern::from("fs.*")],
             partial: std::collections::BTreeMap::new(),
             capabilities: std::collections::BTreeMap::new(),
-            known_limitations: vec!["scripted test double".to_string()],
+            known_limitations: vec![
+                "scripted test double".to_string(),
+                "claims blanket fs.* coverage; no real v0 backend does".to_string(),
+            ],
         }
     }
 }
