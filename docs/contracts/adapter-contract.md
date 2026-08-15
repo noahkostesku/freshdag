@@ -35,7 +35,7 @@ An adapter MUST:
 
    ```json
    {
-     "adapter": "freshdag-adapter-claude",
+     "producer": "freshdag-adapter-claude",
      "version": "0.1.0",
      "role": "adapter",
      "emits": ["session.*", "computation.*", "tool.*", "fs.read", "fs.write"],

@@ -25,20 +25,19 @@ Every observer publishes:
 
 ```json
 {
-  "observer": "freshdag-observer-fsatrace",
+  "producer": "freshdag-observer-fsatrace",
   "version": "0.1.0",
   "role": "observer",
   "platforms": ["linux-x86_64", "linux-arm64"],
+  "emits": [
+    "fs.read", "fs.write", "fs.rename",
+    "proc.spawn", "proc.exit"
+  ],
+  "partial": {
+    "fs.write": "rename-atomic writes are correlated at close; see §Required Behavior 3",
+    "fs.read":  "mmap reads are pessimistic: hashed at mmap time"
+  },
   "capabilities": {
-    "fs.read":  true,
-    "fs.write": true,
-    "fs.rename": true,
-    "fs.stat": false,
-    "fs.dirlist": false,
-    "proc.spawn": true,
-    "proc.exit": true,
-    "net.connect": false,
-    "net.fetch": false,
     "symlink_resolution": "at-observation-time",
     "mmap_reads": "pessimistic (hash at mmap time, assume full read)"
   },
@@ -52,6 +51,21 @@ Every observer publishes:
 Consumers use this manifest to know what "no event" means (invariant
 #7: absence of an event from a producer that does not cover it does
 NOT mean nothing happened).
+
+**Coverage is declared in `emits`, never in `capabilities`.**
+`CoverageManifest::covers()` reads only `emits`, so a kind that is
+absent from `emits` is uncovered — that absence is exactly how an
+observer honestly says "I cannot see this." `capabilities` is a
+free-form map for claims that are not event-kind coverage (symlink
+resolution strategy, mmap pessimism); putting `"fs.read": true` there
+declares nothing, and a manifest that states its coverage only in
+`capabilities` will fail to discharge the `bash`/`task` observation
+obligation in `docs/contracts/certificate-contract.md
+§Coverage-Deficit Rule`.
+
+`role` is likewise load-bearing rather than descriptive: only a
+producer with `role: "observer"` can discharge that obligation, because
+only an observer sees below the agent-tool layer.
 
 ## Required Behavior
 
