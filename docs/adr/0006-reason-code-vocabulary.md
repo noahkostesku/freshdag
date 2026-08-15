@@ -133,10 +133,29 @@ graph "encodes the 'heuristic never promotes to valid' rule as a
 machine-checked property on their manifest." A closed, schema-enforced
 reason vocabulary is what makes *machine-checked* literal rather than
 aspirational: `trust-class-heuristic-caps-at-likely-valid` is now a
-value a test can assert on, not a sentence a human reads. Likewise,
-`ProducerRole` makes the coverage-deficit rule — which §1 notes has no
-analog in the OPA-over-OpenLineage framing — checkable from the
-certificate alone.
+value a test can assert on, not a sentence a human reads.
+
+**That §2 sentence has since been falsified as written.** The Wave 2
+novelty review found **EA-Graph** (arXiv:2608.04278), which encodes a
+machine-checked never-promote rule ("no model output enters at
+`PROVEN`") over an agent-artifact graph, with an anchor-completeness
+check that is a coverage-deficit analog. See `docs/NOVELTY.md` §5.7,
+an open escalation to `architect`. The §2 *conjunction* still has no
+match — EA-Graph re-reads local repository state by content hash and
+has no cross-session probing of external mutable state, no
+scheme-registered probes, no TTL/`volatile` class, and no portable
+certificate — but this ADR must not be read as evidence that the
+"machine-checked" clause is unprecedented on its own.
+
+Likewise `ProducerRole`: it makes the coverage-deficit rule checkable
+from the certificate alone, but the *genus* — provenance that declares
+its own blind spots so a verifier can refuse to over-trust it — is
+occupied by **SLSA v0.2 `metadata.completeness`**, where materials are
+incomplete by default unless the builder asserts otherwise. Our
+differentia is narrow and should be stated narrowly: the discharge
+condition is derived from a role-typed producer registry rather than
+self-asserted by the builder. SLSA lets the builder grade its own
+homework; FreshDAG does not.
 
 **Honest acknowledgement of drift toward adjacent prior art.** A closed
 predicate vocabulary attached to a derived artifact moves the
@@ -147,8 +166,18 @@ acknowledge this and do not claim it as ours: "signed machine-checkable
 predicates on derived artifacts" is explicitly on the §3 firewall list.
 What remains ours is narrower and unchanged by this ADR — the trust
 classes the codes range over, the heuristic-cap rule, and the
-coverage-deficit rule grounded in producer vantage point. No new
-collision was discovered, so §1 needs no update.
+coverage-deficit rule grounded in producer vantage point.
+
+The closed-vocabulary-plus-non-normative-sidecar shape this ADR ships
+also has a direct precedent we had not tracked: **OpenVEX**, whose
+`justification` field is a closed vocabulary and whose
+`impact_statement` is free text the spec discourages consumers from
+parsing — the same design, for the same reason. **RFC 5280
+`CRLReason`** is the older ancestor. Both, along with EA-Graph and
+SLSA, were added to `docs/NOVELTY.md` §1 by the Wave 2 novelty review,
+and corresponding rows were added to the §3 firewall. An earlier
+revision of this ADR asserted that no new collision was discovered;
+that was wrong, and the update it said was unnecessary has been made.
 
 ## Rejected Alternatives
 

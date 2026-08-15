@@ -5,10 +5,13 @@
 FreshDAG learns what they depend on, tracks when those dependencies
 change, and tells you what needs to be recomputed.
 
+FreshDAG attaches to an agent runtime you already use — it is not a
+runner, a wrapper, or an orchestration DSL. You keep your agent;
+FreshDAG observes it from the side and writes a certificate.
+
 ```
-$ freshdag run research_agent.py --account acme
-  wrote acme-brief.md
-  wrote .freshdag/acme-brief.cert.json  (5 file deps, 2 MCP calls)
+# Register the adapter with your runtime once (Claude Code shown here).
+# Your agent runs exactly as it did before.
 
 $ freshdag check acme-brief.md
   FRESH   all 7 inputs unchanged  (checked in 1.2s)
@@ -45,8 +48,12 @@ before large-scale implementation begins.
 
 - **Vision.** Explain, invalidate, and minimally recompute agent-generated
   artifacts as the world changes.
-- **Implemented today.** Repository scaffold, Rust workspace,
-  documentation, contracts, agent topology. No dependency engine yet.
+- **Implemented today.** The canonical execution IR and domain model;
+  a Claude Code adapter that compiles hook payloads into it; an
+  append-only observation store with a deterministic derived
+  dependency graph; `file://` and `https://` freshness probes; and an
+  engine that aggregates per-dependency evidence into a certificate.
+  Detection only — no recomputation, no comparators, no early cutoff.
 - **Planned next.** See `docs/BUILD_PLAN.md`.
 
 ## Why FreshDAG
