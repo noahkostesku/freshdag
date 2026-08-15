@@ -223,7 +223,10 @@ impl ScriptedTransport {
     /// The requests issued so far, in order.
     #[must_use]
     pub fn requests(&self) -> Vec<HttpRequest> {
-        self.seen.lock().expect("scripted transport poisoned").clone()
+        self.seen
+            .lock()
+            .expect("scripted transport poisoned")
+            .clone()
     }
 
     /// How many requests were issued.

@@ -123,7 +123,10 @@ pub fn parse_etag(raw: &str) -> Result<ETag, ETagParseError> {
     let inner = &opaque[1..opaque.len() - 1];
     // etagc = %x21 / %x23-7E / obs-text(%x80-FF). Notably excludes
     // DQUOTE (%x22), SP, HTAB, and all controls.
-    if !inner.bytes().all(|b| b == 0x21 || (0x23..=0x7E).contains(&b) || b >= 0x80) {
+    if !inner
+        .bytes()
+        .all(|b| b == 0x21 || (0x23..=0x7E).contains(&b) || b >= 0x80)
+    {
         return Err(ETagParseError::IllegalCharacter);
     }
 

@@ -15,7 +15,7 @@
 //! | Content-hash fallback (opt-in) | `exact` |
 //! | Neither validator nor fallback | no verdict — `Unknown` |
 //!
-//! Weak ETags are the single most consequential line in that table.
+//! Weak `ETags` are the single most consequential line in that table.
 //! RFC 9110 defines weak equivalence at the entity level, not the octet
 //! level; FreshDAG's `exact` comparators are defined on octets.
 //! Promoting `W/"..."` to `versioned` would launder a trust class
@@ -46,16 +46,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use freshdag_core::dependency::{Fingerprint, FingerprintKind, TrustClass};
-use freshdag_core::ir::{CoverageManifest, Hash, HashAlgo};
+use freshdag_core::ir::{CoverageManifest, Hash, HashAlgo, ProducerRole};
 use freshdag_core::probe::{Probe, ProbeResult};
 use reqwest::Url;
 
 use self::etag::{parse_etag, ETag};
 use self::headers::{is_imf_fixdate, CacheControl, Headers, RetryAfter};
 use self::redirect::{resolve_next_hop, same_origin};
-use self::report::{
-    DiagnosticCode, HttpsCheckOutcome, ProbeCost, ProbeDiagnostic, RetryAfterHint,
-};
+use self::report::{DiagnosticCode, HttpsCheckOutcome, ProbeCost, ProbeDiagnostic, RetryAfterHint};
 use self::transport::{HttpMethod, HttpRequest, HttpResponse, HttpTransport, TransportError};
 
 pub use self::reqwest_transport::ReqwestTransport;
@@ -83,21 +81,16 @@ const MAX_REASON_BYTES: usize = 512;
 /// opt-in is expressed here, keyed by dependency URL. This is an
 /// interim shape: if a dependency-level probe-config channel lands in
 /// `freshdag-core`, this collapses into it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ContentHashFallback {
     /// Never fetch bodies. The default: fallback flips a check from
     /// O(headers) to O(body).
+    #[default]
     Never,
     /// Fetch bodies only for these exact dependency keys.
     ForKeys(BTreeSet<String>),
     /// Fetch bodies for every dependency this probe handles.
     Always,
-}
-
-impl Default for ContentHashFallback {
-    fn default() -> Self {
-        Self::Never
-    }
 }
 
 impl ContentHashFallback {
@@ -191,13 +184,9 @@ impl HttpsProbe {
         capabilities.insert("content_hash_fallback".to_string(), true.into());
         capabilities.insert("auth".to_string(), false.into());
         CoverageManifest {
-            // INTEGRATION NOTE (Phase A `ProducerRole`): once
-            // `freshdag_core::ir::CoverageManifest` gains its required
-            // `role` field, add `role: ProducerRole::Probe,` here. The
-            // type does not exist on this branch's base commit
-            // (f2f7571), so it is deliberately not hand-rolled locally.
             producer: "freshdag-probes/https".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            role: ProducerRole::Probe,
             platforms: Vec::new(),
             emits: vec!["probe.checked".into()],
             partial: std::collections::BTreeMap::new(),
@@ -354,6 +343,40 @@ impl Plan {
     }
 }
 
+/// The response the redirect / method-fallback loop settled on.
+///
+/// The two variants are NOT interchangeable, which is why they are two
+/// variants rather than two status-code arms that clippy would (rightly)
+/// flag as identical:
+///
+/// - [`Settled::NotModified`] is the server *itself* asserting that the
+///   validator we sent is still current. It is the only status carrying
+///   a server-side equality claim, and it is the only status from which
+///   a `Match` may be produced without comparing anything ourselves.
+/// - [`Settled::Representation`] is a fresh representation. Equality is
+///   ours to establish, by comparing validators or hashing octets.
+///
+/// Collapsing them would make invariant #7's most delicate edge — "when
+/// may this probe say `Match`?" — depend on an integer comparison
+/// buried in a loop.
+#[derive(Debug)]
+enum Settled {
+    /// `304 Not Modified`.
+    NotModified(HttpResponse),
+    /// A `2xx` response carrying (or, for `HEAD`, describing) a
+    /// representation.
+    Representation(HttpResponse),
+}
+
+impl Settled {
+    /// Headers of whichever response we settled on.
+    const fn headers(&self) -> &Headers {
+        match self {
+            Self::NotModified(r) | Self::Representation(r) => &r.headers,
+        }
+    }
+}
+
 /// What the final response's headers assert about freshness.
 #[derive(Debug)]
 struct Classification {
@@ -382,10 +405,10 @@ impl HttpsProbe {
         let original = self.parse_and_gate_url(key, ctx)?;
         let plan = self.plan(key, recorded_fp)?;
 
-        let final_response = self.fetch(&original, &plan, ctx)?;
-        let classification = self.classify(&final_response.headers, ctx);
+        let settled = self.fetch(&original, &plan, ctx)?;
+        let classification = Self::classify(settled.headers(), ctx);
 
-        if let Some(ct) = final_response.headers.get("Content-Type") {
+        if let Some(ct) = settled.headers().get("Content-Type") {
             ctx.content_type = Some(ct.to_string());
             ctx.diag(DiagnosticCode::RepresentationRecorded, ct.to_string());
         }
@@ -406,18 +429,24 @@ impl HttpsProbe {
             );
         }
 
-        if final_response.status == 304 {
-            return Ok(self.decide_not_modified(recorded_fp, &plan, &classification));
+        match settled {
+            Settled::NotModified(_) => Ok(Self::decide_not_modified(
+                recorded_fp,
+                &plan,
+                &classification,
+            )),
+            Settled::Representation(response) => {
+                self.decide_ok(&original, &plan, &classification, response, ctx)
+            }
         }
-
-        self.decide_ok(&original, &plan, &classification, final_response, ctx)
     }
 
     fn parse_and_gate_url(&self, key: &str, ctx: &mut Ctx) -> Result<Url, Unresolved> {
         // The key is NOT echoed into the reason: dependency URLs can
         // carry query-string tokens, and reasons end up on shareable
         // certificates.
-        let url = Url::parse(key).map_err(|_| Unresolved::new("malformed-dependency-key", false))?;
+        let url =
+            Url::parse(key).map_err(|_| Unresolved::new("malformed-dependency-key", false))?;
         match url.scheme() {
             "https" => Ok(url),
             "http" if self.config.allow_plaintext_http => {
@@ -489,12 +518,7 @@ impl HttpsProbe {
 
     /// Issue requests until a non-redirect response, applying redirect
     /// policy and the `HEAD` → `GET` fallback.
-    fn fetch(
-        &self,
-        original: &Url,
-        plan: &Plan,
-        ctx: &mut Ctx,
-    ) -> Result<HttpResponse, Unresolved> {
+    fn fetch(&self, original: &Url, plan: &Plan, ctx: &mut Ctx) -> Result<Settled, Unresolved> {
         let mut current = original.clone();
         let mut hops: u8 = 0;
         let mut head_retried = false;
@@ -518,7 +542,7 @@ impl HttpsProbe {
                 .map_err(|e| Unresolved::new(e.reason_token(), e.retryable()))?;
 
             match response.status {
-                304 => return Ok(response),
+                304 => return Ok(Settled::NotModified(response)),
                 405 if method == HttpMethod::Head && !head_retried => {
                     head_retried = true;
                     method = HttpMethod::Get;
@@ -527,7 +551,7 @@ impl HttpsProbe {
                         "origin rejected HEAD; retrying with GET",
                     );
                 }
-                200..=299 => return Ok(response),
+                200..=299 => return Ok(Settled::Representation(response)),
                 300..=399 => {
                     if hops >= self.config.max_redirects {
                         return Err(Unresolved::new(
@@ -545,11 +569,7 @@ impl HttpsProbe {
                     if !same_origin(original, &next) {
                         ctx.diag(
                             DiagnosticCode::CrossOriginRedirect,
-                            format!(
-                                "{} -> {}",
-                                origin_of(original),
-                                origin_of(&next)
-                            ),
+                            format!("{} -> {}", origin_of(original), origin_of(&next)),
                         );
                     }
                     ctx.chain.push(next.to_string());
@@ -562,10 +582,11 @@ impl HttpsProbe {
                     ))
                 }
                 429 => {
-                    ctx.cost.retry_after = RetryAfter::parse(&response.headers).map(|ra| match ra {
-                        RetryAfter::Seconds(s) => RetryAfterHint::Seconds(s),
-                        RetryAfter::HttpDate(d) => RetryAfterHint::HttpDate(d),
-                    });
+                    ctx.cost.retry_after =
+                        RetryAfter::parse(&response.headers).map(|ra| match ra {
+                            RetryAfter::Seconds(s) => RetryAfterHint::Seconds(s),
+                            RetryAfter::HttpDate(d) => RetryAfterHint::HttpDate(d),
+                        });
                     ctx.diag(
                         DiagnosticCode::RateLimited,
                         format!("retry-after={:?}", ctx.cost.retry_after),
@@ -585,7 +606,10 @@ impl HttpsProbe {
                     ))
                 }
                 other => {
-                    return Err(Unresolved::new(format!("unexpected-http-status={other}"), false))
+                    return Err(Unresolved::new(
+                        format!("unexpected-http-status={other}"),
+                        false,
+                    ))
                 }
             }
         }
@@ -593,7 +617,7 @@ impl HttpsProbe {
 
     /// Derive the observed validator and trust class from the final
     /// response's headers.
-    fn classify(&self, headers: &Headers, ctx: &mut Ctx) -> Classification {
+    fn classify(headers: &Headers, ctx: &mut Ctx) -> Classification {
         let raw_etags = headers.get_all("ETag");
         if raw_etags.len() > 1 {
             ctx.diag(
@@ -656,7 +680,6 @@ impl HttpsProbe {
 
     /// `304 Not Modified` — the server explicitly asserts unchanged.
     fn decide_not_modified(
-        &self,
         recorded_fp: &Fingerprint,
         plan: &Plan,
         classification: &Classification,
@@ -665,13 +688,12 @@ impl HttpsProbe {
         // validator here is the server confirming ours, NOT a lost
         // version signal, so we keep the recorded class unless the
         // `304` itself said something stronger or weaker.
-        let observed_trust_class = if classification.has_validator()
-            || classification.cache_control.forbids_caching()
-        {
-            classification.trust_class
-        } else {
-            plan.recorded_trust_class()
-        };
+        let observed_trust_class =
+            if classification.has_validator() || classification.cache_control.forbids_caching() {
+                classification.trust_class
+            } else {
+                plan.recorded_trust_class()
+            };
         ProbeResult::Match {
             observed_fp: recorded_fp.clone(),
             observed_trust_class,
@@ -732,10 +754,7 @@ impl HttpsProbe {
                              If-Modified-Since; endpoint ignores conditional requests",
                         );
                         return Ok(ProbeResult::Match {
-                            observed_fp: Fingerprint::new(
-                                FingerprintKind::Mtime,
-                                observed.clone(),
-                            ),
+                            observed_fp: Fingerprint::new(FingerprintKind::Mtime, observed.clone()),
                             observed_trust_class: classification.trust_class,
                         });
                     }
