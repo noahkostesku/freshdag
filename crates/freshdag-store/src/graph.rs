@@ -167,9 +167,23 @@ pub struct ExcludedEdge {
     pub event_id: Uuid,
     /// Kind of the excluded event.
     pub kind: EventKind,
-    /// Best-effort dependency key, when one could be recovered.
+    /// Best-effort dependency identity, when one could be recovered.
+    ///
+    /// Typed as [`DependencyId`] rather than a raw string so the store
+    /// never re-parses a key it already knows the parts of. If
+    /// `freshdag-core` later gives dependency keys a richer type, this
+    /// field changes with it and no string-shape assumption in this crate
+    /// has to be revisited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key: Option<String>,
+    pub key: Option<DependencyId>,
+    /// Scheme of [`Self::key`], recorded at classification time.
+    ///
+    /// Deliberately *not* recovered by splitting the key on `"://"`. The
+    /// scheme is known for certain where the exclusion is decided;
+    /// re-deriving it later would bake the current wire spelling of a
+    /// dependency key into the derived layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
     /// Why it was excluded.
     pub reason: ExclusionReason,
 }
@@ -780,9 +794,12 @@ impl DerivedGraph {
                 if !excluded.reason.is_unproven_dependency() {
                     continue;
                 }
-                let Some(key) = &excluded.key else { continue };
-                let id = DependencyId(key.clone());
-                let scheme = key.split_once("://").map_or("", |(s, _)| s).to_string();
+                let Some(id) = excluded.key.clone() else {
+                    continue;
+                };
+                // The scheme was recorded when the exclusion was decided;
+                // never re-derived from the key's spelling.
+                let scheme = excluded.scheme.clone().unwrap_or_default();
                 unproven
                     .entry(id)
                     .or_insert_with(|| (scheme, BTreeSet::new()))
@@ -937,6 +954,7 @@ fn classify_read(
                 event_id: event.event_id,
                 kind: event.kind,
                 key: None,
+                scheme: Some(FILE_SCHEME.to_string()),
                 reason: ExclusionReason::MalformedPayload(
                     "fs.read payload did not decode as FsRead".to_string(),
                 ),
@@ -949,37 +967,32 @@ fn classify_read(
                 key: event
                     .payload
                     .get("path")
-                    .and_then(|v| v.as_str())
-                    .map(|p| format!("file://{p}")),
+                    .and_then(serde_json::Value::as_str)
+                    .map(file_key),
+                scheme: Some(FILE_SCHEME.to_string()),
                 reason: ExclusionReason::MalformedPayload(e.to_string()),
             })
         }
     };
-    let key = format!("file://{}", read.path.to_string_lossy());
+    let key = file_key(&read.path.to_string_lossy());
+    let excluded = |reason| {
+        Outcome::Excluded(ExcludedEdge {
+            event_id: event.event_id,
+            kind: event.kind,
+            key: Some(key.clone()),
+            scheme: Some(FILE_SCHEME.to_string()),
+            reason,
+        })
+    };
 
     if written.contains(&read.path) {
-        return Outcome::Excluded(ExcludedEdge {
-            event_id: event.event_id,
-            kind: event.kind,
-            key: Some(key),
-            reason: ExclusionReason::ReadAfterOwnWrite,
-        });
+        return excluded(ExclusionReason::ReadAfterOwnWrite);
     }
     if read.impure {
-        return Outcome::Excluded(ExcludedEdge {
-            event_id: event.event_id,
-            kind: event.kind,
-            key: Some(key),
-            reason: ExclusionReason::Impure,
-        });
+        return excluded(ExclusionReason::Impure);
     }
     let Some(hash) = read.hash.as_ref() else {
-        return Outcome::Excluded(ExcludedEdge {
-            event_id: event.event_id,
-            kind: event.kind,
-            key: Some(key),
-            reason: ExclusionReason::NoFingerprint,
-        });
+        return excluded(ExclusionReason::NoFingerprint);
     };
 
     let mut dep = freshdag_core::dependency::exact_file(
@@ -1014,7 +1027,8 @@ fn classify_write(event: &IrEvent, written: &mut BTreeSet<PathBuf>) -> Outcome {
     Outcome::Excluded(ExcludedEdge {
         event_id: event.event_id,
         kind: event.kind,
-        key: raw_path.map(|p| format!("file://{p}")),
+        key: raw_path.map(file_key),
+        scheme: Some(FILE_SCHEME.to_string()),
         reason: ExclusionReason::MalformedPayload(
             "fs.write payload did not decode as FsWrite".to_string(),
         ),
@@ -1022,60 +1036,62 @@ fn classify_write(event: &IrEvent, written: &mut BTreeSet<PathBuf>) -> Outcome {
 }
 
 fn classify_probe(event: &IrEvent) -> Outcome {
-    let scheme = event.payload.get("scheme").and_then(|v| v.as_str());
-    let raw_key = event.payload.get("key").and_then(|v| v.as_str());
+    let scheme = event
+        .payload
+        .get("scheme")
+        .and_then(serde_json::Value::as_str);
+    let raw_key = event.payload.get("key").and_then(serde_json::Value::as_str);
     let (Some(scheme), Some(raw_key)) = (scheme, raw_key) else {
         return Outcome::Excluded(ExcludedEdge {
             event_id: event.event_id,
             kind: event.kind,
             key: None,
+            scheme: scheme.map(ToString::to_string),
             reason: ExclusionReason::MalformedPayload(
                 "probe.checked payload lacks `scheme` or `key`".to_string(),
             ),
         });
     };
-    let key = DependencyId::from_scheme_key(scheme, raw_key).0;
+    let id = DependencyId::from_scheme_key(scheme, raw_key);
+    let excluded = |reason| {
+        Outcome::Excluded(ExcludedEdge {
+            event_id: event.event_id,
+            kind: event.kind,
+            key: Some(id.clone()),
+            scheme: Some(scheme.to_string()),
+            reason,
+        })
+    };
 
-    let trust_class = match event.payload.get("trust_class").and_then(|v| v.as_str()) {
+    let trust_class = match event
+        .payload
+        .get("trust_class")
+        .and_then(serde_json::Value::as_str)
+    {
         Some("exact") => TrustClass::Exact,
         Some("versioned") => TrustClass::Versioned,
         Some("heuristic") => TrustClass::Heuristic,
         Some("volatile") => TrustClass::Volatile,
         other => {
-            return Outcome::Excluded(ExcludedEdge {
-                event_id: event.event_id,
-                kind: event.kind,
-                key: Some(key),
-                reason: ExclusionReason::MalformedPayload(format!(
-                    "probe.checked trust_class is {other:?}"
-                )),
-            })
+            return excluded(ExclusionReason::MalformedPayload(format!(
+                "probe.checked trust_class is {other:?}"
+            )))
         }
     };
 
     let Some(raw_fp) = event
         .payload
         .get("observed_fingerprint")
-        .and_then(|v| v.as_str())
+        .and_then(serde_json::Value::as_str)
     else {
-        return Outcome::Excluded(ExcludedEdge {
-            event_id: event.event_id,
-            kind: event.kind,
-            key: Some(key),
-            reason: ExclusionReason::NoFingerprint,
-        });
+        return excluded(ExclusionReason::NoFingerprint);
     };
     let fingerprint: Fingerprint = match raw_fp.parse() {
         Ok(f) => f,
         Err(e) => {
-            return Outcome::Excluded(ExcludedEdge {
-                event_id: event.event_id,
-                kind: event.kind,
-                key: Some(key),
-                reason: ExclusionReason::MalformedPayload(format!(
-                    "unparseable observed_fingerprint: {e}"
-                )),
-            })
+            return excluded(ExclusionReason::MalformedPayload(format!(
+                "unparseable observed_fingerprint: {e}"
+            )))
         }
     };
 
@@ -1084,16 +1100,11 @@ fn classify_probe(event: &IrEvent) -> Outcome {
         .get("ttl_seconds")
         .and_then(serde_json::Value::as_u64);
     if matches!(trust_class, TrustClass::Volatile) && ttl_seconds.is_none() {
-        return Outcome::Excluded(ExcludedEdge {
-            event_id: event.event_id,
-            kind: event.kind,
-            key: Some(key),
-            reason: ExclusionReason::NakedVolatile,
-        });
+        return excluded(ExclusionReason::NakedVolatile);
     }
 
     Outcome::Edge(Box::new(Dependency {
-        key,
+        key: id.0,
         scheme: scheme.to_string(),
         trust_class,
         fingerprint,
@@ -1109,6 +1120,7 @@ fn classify_artifact(event: &IrEvent) -> Outcome {
             event_id: event.event_id,
             kind: event.kind,
             key: None,
+            scheme: None,
             reason: ExclusionReason::MalformedPayload(
                 "artifact.produced payload lacks `artifact_id`".to_string(),
             ),
@@ -1155,4 +1167,16 @@ fn classify_tool(event: &IrEvent) -> Outcome {
 /// instant is unchanged.
 fn observed_at(ts: OffsetDateTime) -> OffsetDateTime {
     ts.to_offset(time::UtcOffset::UTC)
+}
+
+/// Scheme used for filesystem dependency keys.
+const FILE_SCHEME: &str = "file";
+
+/// The [`DependencyId`] for a filesystem path.
+///
+/// Delegates to [`DependencyId::from_scheme_key`] rather than formatting
+/// the wire string here, so the wire spelling of a file key lives in
+/// `freshdag-core` and not in this crate.
+fn file_key(path: &str) -> DependencyId {
+    DependencyId::from_scheme_key(FILE_SCHEME, path)
 }

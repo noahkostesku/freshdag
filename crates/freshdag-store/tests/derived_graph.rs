@@ -626,7 +626,7 @@ fn read_after_own_write_is_internal_state_not_a_dependency() {
     let excluded = node
         .excluded
         .iter()
-        .find(|e| e.key.as_deref() == Some(&format!("file://{BUILD_LOG}")))
+        .find(|e| e.key.as_ref() == Some(&dep(&format!("file://{BUILD_LOG}"))))
         .expect("build.log exclusion recorded");
     assert_eq!(excluded.reason, ExclusionReason::ReadAfterOwnWrite);
 
@@ -681,7 +681,7 @@ fn an_unfingerprinted_read_is_unproven_not_absent() {
     let excluded = node
         .excluded
         .iter()
-        .find(|e| e.key.as_deref() == Some(&key))
+        .find(|e| e.key.as_ref() == Some(&dep(&key)))
         .expect("recorded");
     assert_eq!(excluded.reason, ExclusionReason::NoFingerprint);
     assert!(excluded.reason.is_unproven_dependency());
@@ -707,7 +707,7 @@ fn an_impure_read_is_excluded_and_carries_no_blast_radius() {
     let excluded = node
         .excluded
         .iter()
-        .find(|e| e.key.as_deref() == Some(&key))
+        .find(|e| e.key.as_ref() == Some(&dep(&key)))
         .expect("recorded");
     assert_eq!(excluded.reason, ExclusionReason::Impure);
     assert!(!excluded.reason.is_unproven_dependency());
@@ -748,7 +748,7 @@ fn a_naked_volatile_probe_result_is_excluded_but_a_ttl_one_is_not() {
     let excluded = node
         .excluded
         .iter()
-        .find(|e| e.key.as_deref() == Some("attio://people/42"))
+        .find(|e| e.key.as_ref() == Some(&dep("attio://people/42")))
         .expect("naked volatile recorded");
     assert_eq!(excluded.reason, ExclusionReason::NakedVolatile);
 
