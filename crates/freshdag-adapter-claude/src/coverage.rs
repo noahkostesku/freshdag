@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use freshdag_core::ir::{CoverageManifest, EventKindPattern};
+use freshdag_core::ir::{CoverageManifest, EventKindPattern, ProducerRole};
 use serde_json::{json, Value};
 
 use crate::config::{AdapterConfig, PRODUCER};
@@ -32,15 +32,16 @@ pub fn coverage_manifest_for(config: &AdapterConfig) -> CoverageManifest {
 }
 
 fn manifest_with_version(version: &str, identity_rule: &str) -> CoverageManifest {
-    // PENDING PHASE A: once `freshdag_core::ir::ProducerRole` exists,
-    // add `role: ProducerRole::Adapter` here. `coverage.json` already
-    // declares `"role": "adapter"` (pinned by
-    // `coverage_json_declares_the_adapter_role`), so this is the only
-    // remaining edit. The field is what stops this adapter's
-    // `fs.read`/`fs.write` declaration from discharging the
-    // observation obligation that `Certificate::check_coverage_deficit`
-    // exists to enforce — see `known_limitations()` entry 2.
+    // `role` is what stops this adapter's `fs.read`/`fs.write`
+    // declaration from discharging the observation obligation that
+    // `Certificate::check_coverage_deficit` exists to enforce. This
+    // adapter genuinely synthesizes fs events from Read/Write/Edit tool
+    // inputs, but it is blind inside `bash` and `task` subprocesses, so
+    // only a `ProducerRole::Observer` may discharge that obligation —
+    // see `known_limitations()` entry 2 and certificate-contract
+    // §Coverage-Deficit Rule.
     CoverageManifest {
+        role: ProducerRole::Adapter,
         producer: PRODUCER.to_string(),
         version: version.to_string(),
         platforms: vec!["any".to_string()],
