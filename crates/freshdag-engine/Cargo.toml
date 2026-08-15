@@ -13,5 +13,16 @@ workspace = true
 [dependencies]
 freshdag-core.workspace = true
 freshdag-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+# Dev-only: proves a real `Probe` implementation arbitrates through
+# `ProbeRegistry` and drives `Engine::check`. The engine itself depends
+# on no probe crate — invariant #14 / "do not depend on a specific
+# adapter or observer" applies to probes too.
+freshdag-probes.workspace = true

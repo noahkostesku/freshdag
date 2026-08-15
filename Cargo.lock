@@ -380,9 +380,14 @@ name = "freshdag-engine"
 version = "0.0.0"
 dependencies = [
  "freshdag-core",
+ "freshdag-probes",
  "freshdag-store",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
+ "time",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
