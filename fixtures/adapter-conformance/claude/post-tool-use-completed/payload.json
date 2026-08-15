@@ -1,0 +1,14 @@
+{
+  "session_id": "1e9c4d2a-3f5b-4a7c-9d81-6b2e0f4a7c31",
+  "cwd": "/Users/dev/repo",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 build.py"
+  },
+  "tool_response": {
+    "stdout": "wrote dist/report.json\n",
+    "stderr": "",
+    "interrupted": false
+  }
+}

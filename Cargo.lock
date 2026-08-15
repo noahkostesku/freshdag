@@ -240,10 +240,14 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 name = "freshdag-adapter-claude"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "freshdag-core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
+ "time",
+ "uuid",
 ]
 
 [[package]]

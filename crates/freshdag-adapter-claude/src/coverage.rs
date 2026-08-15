@@ -1,0 +1,198 @@
+//! This adapter's coverage manifest.
+//!
+//! `docs/contracts/execution-ir.md §Coverage Declarations`: *"Consumers
+//! use this manifest to know what 'no event' means: silent because the
+//! producer does not cover this signal is different from silent because
+//! nothing happened."*
+//!
+//! The Rust constructor here and `coverage.json` at the crate root are
+//! two spellings of one fact, and a test asserts they agree. A drifting
+//! manifest is precisely the failure the certificate contract's
+//! coverage-deficit rule cannot tolerate.
+
+use std::collections::BTreeMap;
+
+use freshdag_core::ir::{CoverageManifest, EventKindPattern};
+use serde_json::{json, Value};
+
+use crate::config::{AdapterConfig, PRODUCER};
+use crate::hook::HookEvent;
+use crate::identity::SESSION_AS_COMPUTATION_V1;
+
+/// The manifest as this build of the adapter behaves.
+#[must_use]
+pub fn coverage_manifest() -> CoverageManifest {
+    manifest_with_version(env!("CARGO_PKG_VERSION"), SESSION_AS_COMPUTATION_V1)
+}
+
+/// The manifest for a given adapter configuration.
+#[must_use]
+pub fn coverage_manifest_for(config: &AdapterConfig) -> CoverageManifest {
+    manifest_with_version(&config.producer_version, &config.identity_rule_version)
+}
+
+fn manifest_with_version(version: &str, identity_rule: &str) -> CoverageManifest {
+    // PENDING PHASE A: once `freshdag_core::ir::ProducerRole` exists,
+    // add `role: ProducerRole::Adapter` here. `coverage.json` already
+    // declares `"role": "adapter"` (pinned by
+    // `coverage_json_declares_the_adapter_role`), so this is the only
+    // remaining edit. The field is what stops this adapter's
+    // `fs.read`/`fs.write` declaration from discharging the
+    // observation obligation that `Certificate::check_coverage_deficit`
+    // exists to enforce — see `known_limitations()` entry 2.
+    CoverageManifest {
+        producer: PRODUCER.to_string(),
+        version: version.to_string(),
+        platforms: vec!["any".to_string()],
+        emits: vec![
+            EventKindPattern::from("session.*"),
+            EventKindPattern::from("computation.*"),
+            EventKindPattern::from("tool.*"),
+            EventKindPattern::from("fs.read"),
+            EventKindPattern::from("fs.write"),
+            EventKindPattern::from("diagnostic"),
+        ],
+        partial: partial_notes(),
+        capabilities: capabilities(identity_rule),
+        known_limitations: known_limitations(),
+    }
+}
+
+fn partial_notes() -> BTreeMap<String, String> {
+    let mut m = BTreeMap::new();
+    m.insert(
+        "fs.read".to_string(),
+        "synthesized ONLY from the `Read` tool's `file_path` input on PreToolUse. \
+         Pre-execution intent, not a confirmed effect: a denied or failed Read still \
+         produces this event. `size` is a placeholder (`size_observed: false`) and `hash` \
+         is absent because the compile path never touches the filesystem. Reads performed \
+         by any other means are invisible here."
+            .to_string(),
+    );
+    m.insert(
+        "fs.write".to_string(),
+        "synthesized ONLY from `Write`/`Edit`/`MultiEdit`/`NotebookEdit` `file_path` \
+         (`notebook_path` for NotebookEdit) inputs on PreToolUse. Pre-execution intent, \
+         not a confirmed effect. `mode` is always `truncate` because hook payloads do not \
+         reveal prior existence. `size`/`hash` are real only for `Write` (whose input \
+         carries the full contents); the edit tools carry `size_observed: false` and no \
+         hash."
+            .to_string(),
+    );
+    m.insert(
+        "fs.*".to_string(),
+        "FILESYSTEM EFFECTS INSIDE `bash` AND `task` INVOCATIONS ARE INVISIBLE TO THIS \
+         ADAPTER AND ARE OBSERVER TERRITORY. A hook payload exposes a Bash command line \
+         and a Task prompt, never the syscalls they perform. This adapter emits NO fs \
+         events for tool_kind `bash` or `task`, which is what lets \
+         `Certificate::check_coverage_deficit` force a non-`valid` status when no \
+         fs-covering observer is present."
+            .to_string(),
+    );
+    m.insert(
+        "tool.completed".to_string(),
+        "`duration_ms` is always 0 with `duration_observed: false` — Claude Code hook \
+         payloads carry no timing. `is_error: false` means `no error signal was present \
+         in tool_response`, not `the tool succeeded`. No `causal_inputs` links a \
+         tool.completed to its tool.invoked: each hook fires in its own process and this \
+         adapter keeps no cross-invocation state; the normalized `tool_name` is carried \
+         on the payload so a consumer can correlate."
+            .to_string(),
+    );
+    m.insert(
+        "computation.*".to_string(),
+        "one Claude Code session is one computation. `computation.started` is emitted \
+         only on `SessionStart` with `source: startup`; resume/clear/compact starts emit \
+         a `computation-bracket-skipped` diagnostic instead of reopening the bracket. \
+         `Task` subagents are NOT sliced into sub-computations under this identity rule."
+            .to_string(),
+    );
+    m
+}
+
+fn capabilities(identity_rule: &str) -> BTreeMap<String, Value> {
+    let mut m = BTreeMap::new();
+    m.insert("identity_rule".to_string(), json!(identity_rule));
+    m.insert(
+        "identity_rule_description".to_string(),
+        json!(
+            "one Claude Code session = one computation; \
+             recipe_id_or_hash = \"claude-code-session:<session_id>\", \
+             canonicalized_declared_inputs = \"\", \
+             adapter_identity_rule_version = the identity_rule string"
+        ),
+    );
+    m.insert(
+        "computation_id_derivation".to_string(),
+        json!("freshdag_core::computation::ComputationId::derive"),
+    );
+    m.insert(
+        "hook_events_supported".to_string(),
+        json!(HookEvent::ALL.map(HookEvent::as_str)),
+    );
+    m.insert(
+        "hook_events_with_ir_mapping".to_string(),
+        json!(HookEvent::ALL
+            .iter()
+            .filter(|e| e.has_ir_mapping())
+            .map(|e| e.as_str())
+            .collect::<Vec<_>>()),
+    );
+    m.insert("hook_matcher".to_string(), json!(".*"));
+    m.insert("transcript_tailing".to_string(), json!(false));
+    m.insert(
+        "fs_coverage_scope".to_string(),
+        json!("tool-input-derived-only"),
+    );
+    m.insert("fs_events_are_confirmed_effects".to_string(), json!(false));
+    m.insert("symlink_resolution".to_string(), json!(false));
+    m.insert("path_canonicalization".to_string(), json!("lexical-only"));
+    m.insert("proc.spawn".to_string(), json!(false));
+    m.insert("net.connect".to_string(), json!(false));
+    m.insert("net.fetch".to_string(), json!(false));
+    m
+}
+
+fn known_limitations() -> Vec<String> {
+    vec![
+        "BASH/TASK BLINDNESS: filesystem, process and network effects inside `Bash` \
+         subprocesses and `Task` subagents are invisible to this adapter. It emits \
+         tool.invoked with tool_kind `bash`/`task` and NO fs events, so the certificate \
+         contract's coverage-deficit rule can see the gap."
+            .to_string(),
+        "THIS ADAPTER IS NOT AN OBSERVER. Its `fs.read`/`fs.write` coverage is derived \
+         from tool inputs only. The engine MUST NOT treat this producer as satisfying the \
+         fs-coverage requirement of `Certificate::check_coverage_deficit`; a systems \
+         observer is still required before a computation that invoked bash/task may be \
+         `valid`."
+            .to_string(),
+        "COMPUTATION IDENTITY GAP: Claude Code exposes no recipe, so \
+         `recipe_id_or_hash` is synthesized as `claude-code-session:<session_id>` per the \
+         execution-IR contract's fallback clause. `computation.started` carries no \
+         `inputs_declared`, and `Computation::recipe_hash` cannot be populated from hook \
+         payloads — which by invariant #9 caps such computations below `valid`."
+            .to_string(),
+        "fs.* events are PRE-EXECUTION INTENT (`observation: pre-execution-intent`), \
+         derived from PreToolUse. A tool call denied by permissions or failing at runtime \
+         still produces one."
+            .to_string(),
+        "NO TRANSCRIPT TAILING: `transcript_path` is not read, so subagent parenthood is \
+         not reconstructed and `tool.completed` carries no `causal_inputs` to its \
+         `tool.invoked`. Causal links exist only within a single hook invocation."
+            .to_string(),
+        "`tool.completed.duration_ms` is always 0 (`duration_observed: false`); hook \
+         payloads carry no timing."
+            .to_string(),
+        "Paths are canonicalized LEXICALLY against the payload `cwd`. Symlinks are not \
+         resolved and `follow_symlink_target` is always absent."
+            .to_string(),
+        "`UserPromptSubmit`, `Stop`, `SubagentStop`, `PreCompact` and `Notification` are \
+         recognized but have no canonical IR kind in execution-ir v0.1; each produces an \
+         info-severity `unmapped-hook-event` diagnostic rather than a silent drop."
+            .to_string(),
+        "The coverage override is a list of event-kind patterns supplied on the command \
+         line or via the environment, not the override *file* named by the adapter \
+         contract's §Configuration."
+            .to_string(),
+    ]
+}
