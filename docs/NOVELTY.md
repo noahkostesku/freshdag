@@ -54,10 +54,25 @@ public novelty claim and treated as living rather than final.
 | **W3C Verifiable Credentials `credentialStatus`** | Predicate-attached-to-artifact with explicit revocation/refresh mechanism. | Conceptually a `freshness` facet in a different ecosystem. | Not agent-aware; not a runtime system. | Medium | https://www.w3.org/TR/vc-data-model-2.0/ |
 | **OPA / Rego policy over OpenLineage events** | Policy-driven lineage validation. | The "just write a Rego policy over your lineage store" attack — must pre-empt. | No trust-class typing; no coverage-deficit rule; policy runs after the fact. | Medium (rhetorical) | https://openlineage.io/docs/integrations/opa |
 | **`uv.lock` / `pip-audit` / `npm overrides` freshness annotations** | Per-dependency staleness metadata in package ecosystems. | Not agent-aware, but reviewers will point at them. | Package-scoped; static; no probes. | Low | https://docs.astral.sh/uv/reference/settings/ |
+| **EA-Graph** (2026) | Artifact-anchored verification memory for coding agents under upstream drift. Two lattices — Evidence (`UNKNOWN < PARTIAL < PROVEN`) and Freshness (`FRESH`/`STALE`); an "LLM quarantine" rule (no model output enters at `PROVEN`); anchor-completeness as a checkable property; a `STALE` fact on a path refuses the query with a rebuild obligation. | **The closest published system to §2.** A typed evidence lattice over agent-produced artifacts, bindings anchored from verification-session traces, a machine-checked never-promote rule, a coverage/completeness check, and refusal rather than promotion. | Re-reads local repository state by content hash only: no cross-session probing of external mutable state, no scheme-registered probes, no TTL/`volatile` class, no portable certificate. | **Very high (narrows §2 — see §5.7)** | https://arxiv.org/abs/2608.04278 |
+| **AgentTrails** (2026) | Converts raw agent trajectories into structured provenance graphs; tool calls as computational actions, inputs/outputs as data artifacts; quotient graphs aligning recurring structure across runs. | Trace→provenance-graph inference with edge-evidence tiering (exact / semantic candidate / LLM-refined). | A viewer and sensemaking tool: no validity checking, no external probing, no invalidation propagation. | High (confirms trace-derived graphs are substrate, not contribution) | https://arxiv.org/abs/2607.18816 |
+| **AgentFlow agent dependency graphs** (2026) | Builds agent dependency graphs (which agents invoke which tools, which tools touch which resources, how memory propagates) for static analysis of agent programs. | Owns the term "agent dependency graph". | Static analysis of program text; no runtime observation, no freshness. | Medium | https://arxiv.org/pdf/2607.01640 |
+| **SkillDepAnalyzer / SKILL-DEP** (2026) | Models agent skills as dependency-bearing artifacts; recovers mixed skill/package/service dependency graphs; outperforms package-centric SBOM tooling. | "Agent artifacts have dependencies that must be recovered rather than declared." | Supply-chain risk analysis over skill manifests; no runtime trace ingestion, no freshness, no probes. | Medium | https://arxiv.org/abs/2607.01136 |
+| **GRADE** (2026) | Two-layer graph over LLM agent execution — an execution layer for control flow, a dependency layer for what each step relies on — motivated explicitly by "values read early that go stale between steps." | Uses *staleness of a read value* as the motivating failure mode over a trace-inferred agent dependency graph. | Within-run diagnosis; no cross-session artifact validity, no probes, no trust classes, no certificate. | High (framing + naming) | https://arxiv.org/pdf/2606.22741 |
+| **TVCACHE** (2026) | Stateful tool-value cache for post-training LLM agents: a tool-call graph plus sandbox snapshots, longest-prefix matching for reuse across RL rollouts. | Caching and reusing *tool results* keyed on a graph is what "don't rerun the agent" looks like from the caching side. | Reuse within RL training rollouts, keyed on call-prefix identity rather than external-state revalidation. | Medium (characterized from abstract only — reverify before any public comparison) | https://arxiv.org/pdf/2602.10986 |
+| **"From Agent Traces to Trust" survey** (2026) | Survey of evidence tracing and execution provenance in LLM agents; names stale memory items and unsupported retrievals as open problems. | Establishes agent provenance as a populated field with named open problems — the literature review reviewers will hand us. | A survey, not a system. | Medium (must-cite) | https://arxiv.org/abs/2606.04990 |
+| **OpenVEX / CSAF VEX** | Machine-readable exploitability statements about an artifact: a closed `status` set, a **closed `justification` vocabulary** (`component_not_present`, `vulnerable_code_not_present`, …), and a free-text `impact_statement` the spec discourages *precisely because it is not machine-readable*. | **The exact shape of ADR 0006**: a closed reason vocabulary plus a deliberately non-normative free-text sidecar, attached to a status assertion about an artifact. | Vulnerability scope; no trust classes, no probes, no freshness over time. | **High (format — direct hit on ADR 0006)** | https://github.com/openvex/spec/blob/main/OPENVEX-SPEC.md |
+| **RFC 5280 `CRLReason` / OCSP revocation reasons** | Closed enum of reason codes attached to a machine-checkable validity assertion about a credential. | Oldest precedent for "closed reason-code vocabulary on a validity status." | Not artifact- or dependency-aware. | Medium (primitive precedent) | https://www.rfc-editor.org/rfc/rfc5280 |
+| **SLSA v0.2 `metadata.completeness`** | The builder declares which parts of the provenance it claims complete (`materials`, `parameters`, `environment`); materials are **incomplete by default** unless the builder asserts otherwise. | **The coverage-deficit rule's direct ancestor**: provenance that declares its own blind spots so a verifier can refuse to over-trust it. | Self-declared by the builder rather than derived from a role-typed producer registry; one-shot at build time; not agent-aware. | **High (primitive — direct hit on the coverage-deficit rule)** | https://slsa.dev/spec/v0.2/provenance |
+| **HTTP caching semantics — RFC 9110 §8.8.1 validators, RFC 9111 §4.2.2 heuristic freshness** | Strong vs. weak validator distinction (weak validators licensed only for weak comparison); freshness from `Cache-Control`/`Expires`, falling back to explicitly-named **"heuristic freshness"** when no explicit lifetime exists. | The `https` probe's trust mapping *is* this taxonomy renamed: strong ETag→`versioned`, weak ETag→`heuristic`, `Last-Modified`→`heuristic`, `no-store`→`volatile`. The word "heuristic" is theirs. | HTTP does not aggregate per-resource freshness into a validity verdict on a *derived* artifact, and has no notion of a producer's observation coverage. | **High (mechanism + naming)** | https://www.rfc-editor.org/rfc/rfc9110#section-8.8.1 ; https://www.rfc-editor.org/rfc/rfc9111#section-4.2.2 |
+| **Event sourcing / CQRS; Datomic; Kafka log compaction + materialized views** | Append-only immutable fact log as sole source of truth; query-side state is a disposable projection rebuilt by deterministic replay. | Exactly `freshdag-store`'s shape: canonical `events.jsonl`, disposable `derived/`, a `(ts, producer, event_id)` linearization, and a digest binding a projection to its log. | Storage and architecture patterns; no dependency semantics, no validity, no external probing. | **High (mechanism — W2's store is unclaimable)** | https://martinfowler.com/eaaDev/EventSourcing.html ; https://www.datomic.com |
+| **DataHub "Impact Analysis" / dbt `state:modified+` / Marquez downstream lineage** | Named, shipped features answering "this upstream changed — which downstream assets are affected?" over a stored lineage graph. | **Literally W3's reverse blast-radius index.** `DependencyId → consuming ArtifactId[]` is a flagship lineage feature, not a contribution. | Authored graphs (dbt) or ingested pipeline lineage (DataHub, Marquez); no trust classes, no per-artifact validity verdict. | **High (implementation — W3's reverse index is unclaimable)** | https://datahubproject.io/docs/act-on-metadata/impact-analysis ; https://docs.getdbt.com/reference/node-selection/methods |
 
-Systems flagged for follow-up verification (memos could not confirm they
-exist as distinct named projects; see §5): **AgentTrails, AgentFlow
-Agent-Dependency-Graph, SkillDepAnalyzer, TVCACHE, GroundedCache**.
+Follow-up verification status (was: "memos could not confirm these
+exist"). As of 2026-08-15 all but one are **confirmed real and now
+tabled above**: AgentTrails, AgentFlow Agent-Dependency-Graph,
+SkillDepAnalyzer, and TVCACHE all exist as named 2026 arXiv work. Only
+**GroundedCache** remains unlocated; keep the adversarial default.
 
 ---
 
@@ -134,6 +149,13 @@ public talks must reread this list.
 | Portable third-party-checkable build manifests | Reproducible Builds `.buildinfo`. |
 | Provenance graphs as a concept | W3C PROV. |
 | "Make for X" as a framing | Dagster and predecessors. |
+| A closed reason-code vocabulary on a machine-checkable status assertion, with a non-normative free-text sidecar | OpenVEX `justification` + `impact_statement`; RFC 5280 `CRLReason`. **This is ADR 0006's shape.** |
+| Provenance that declares its own blind spots so a verifier can refuse to over-trust it | SLSA v0.2 `metadata.completeness`; EA-Graph anchor-completeness. **This is the coverage-deficit rule's genus.** |
+| Strong-vs-weak validator trust distinction, or "heuristic freshness" for HTTP resources | RFC 9110 §8.8.1, RFC 9111 §4.2.2. The `https` probe implements their taxonomy; it did not invent it. |
+| Append-only event log whose derived state is a disposable projection rebuilt by deterministic replay | Event sourcing / CQRS, Datomic, Kafka log compaction. |
+| Reverse-lineage blast-radius / downstream impact analysis | DataHub Impact Analysis, dbt `state:modified+`, Marquez. |
+| Typed evidence or confidence lattices over agent-produced artifacts, or a never-promote rule for LLM-generated evidence | EA-Graph (`UNKNOWN < PARTIAL < PROVEN`, "LLM quarantine"). |
+| Staleness of a value read earlier in an agent run as a named failure mode | GRADE; "From Agent Traces to Trust". |
 
 ---
 
@@ -172,11 +194,12 @@ The research memos that produced this document were generated without live
 web access. Before FreshDAG makes a public novelty claim, the following
 must be verified against current sources:
 
-1. **Named systems we could not verify:** AgentTrails, AgentFlow
-   Agent-Dependency-Graph, SkillDepAnalyzer, TVCACHE, GroundedCache.
-   Adversarial default: assume they exist and match. If any matches our
-   exact framing, the wedge collapses and this document must be
-   rewritten.
+1. ~~**Named systems we could not verify:** AgentTrails, AgentFlow
+   Agent-Dependency-Graph, SkillDepAnalyzer, TVCACHE, GroundedCache.~~
+   **Resolved 2026-08-15 (Wave 2 novelty review).** Four of the five are
+   confirmed real and are now rows in §1. None matches our exact framing;
+   the wedge did not collapse on these. **GroundedCache** is still
+   unlocated — keep the adversarial default for it alone.
 2. **Dagster 2025 cycle for LLM asset sensors and MCP-driven upstream
    sources.** Cited from memory; confirm before any Dagster comparison
    is made in public.
@@ -191,6 +214,31 @@ must be verified against current sources:
 6. **Recent Cognition / Factory / Poolside / Adept** product surfaces.
    Long-lived agent sessions are the most likely to ship a competing
    freshness story.
+7. **OPEN ESCALATION TO `architect` — §2's supporting argument is
+   falsified as written.** §2 justifies the wedge by asserting that "no
+   trace store, no lineage graph, and no incremental-computation
+   framework encodes the 'heuristic never promotes to valid' rule as a
+   machine-checked property on their manifest." **EA-Graph** (§1) does
+   encode exactly that rule, machine-checked, over an agent-artifact
+   graph: its LLM-quarantine rule is "no model output enters at
+   `PROVEN`", and its anchor-completeness check is a coverage-deficit
+   analogue. EA-Graph is technically none of the three named categories,
+   so the sentence is not literally false — but it is rhetorically dead,
+   and a reviewer will say so in the first minute.
+
+   Two further §1 additions narrow the same territory from the
+   supply-chain side: **SLSA `metadata.completeness`** predates the
+   coverage-deficit rule as a primitive, and **OpenVEX** predates ADR
+   0006's closed-reason-vocabulary-plus-non-normative-detail shape.
+
+   The one-sentence conjunction in §2 still has no match, because
+   EA-Graph does not probe **external mutable state across sessions** and
+   emits no **portable certificate**. The novelty-reviewer's position is
+   therefore: the wedge survives, but its *load* must shift from
+   "trust-class typing is unprecedented" to "trust-class typing bound to
+   cross-session external-mutation probing, in a portable artifact, is
+   unprecedented." Rewriting §2 is the architect's call, not the
+   reviewer's.
 
 Owner: `novelty-reviewer` agent (see `.claude/agents/novelty-reviewer.md`).
 
