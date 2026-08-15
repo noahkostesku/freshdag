@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use super::{
     envelope::DecodeError, CoverageManifest, EventKind, EventKindPattern, FsRead, FsReadKind,
-    FsWrite, FsWriteMode, Hash, HashAlgo, HashParseError, IrEvent, ToolCompleted, ToolInvoked,
-    ProducerRole, ToolKind, TypedPayload,
+    FsWrite, FsWriteMode, Hash, HashAlgo, HashParseError, IrEvent, ProducerRole, ToolCompleted,
+    ToolInvoked, ToolKind, TypedPayload,
 };
 
 fn sample_uuid() -> Uuid {

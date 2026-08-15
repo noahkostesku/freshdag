@@ -536,8 +536,7 @@ fn repo_root() -> std::path::PathBuf {
 
 fn read_schema(rel: &str) -> serde_json::Value {
     let path = repo_root().join(rel);
-    let text =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {rel}: {e}",));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {rel}: {e}"));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("{rel} is not valid JSON: {e}"))
 }
 
@@ -798,12 +797,15 @@ fn artifact_scoped_reasons_use_empty_key_sentinel_and_sort_last() {
     assert_eq!(v.reasons[0].dependency_key, "");
     assert!(v.reasons[0].reason.is_artifact_scoped());
     let json = serde_json::to_value(&v.reasons[0]).unwrap();
-    assert_eq!(json.get("dependency_key").and_then(|k| k.as_str()), Some(""));
+    assert_eq!(
+        json.get("dependency_key").and_then(|k| k.as_str()),
+        Some("")
+    );
 
     // Ordering: edge-scoped reasons keep depends_on[] order; any
     // artifact-scoped reason sorts after all of them. `cert_id` hashes
     // this list, so the order is wire-visible.
-    let mut reasons = vec![
+    let mut reasons = [
         ValidityReason {
             dependency_key: String::new(),
             reason: ReasonCode::CoverageDeficit,
