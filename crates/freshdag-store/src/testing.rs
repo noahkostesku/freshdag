@@ -3,7 +3,7 @@
 //! Every value here is fixed: no clocks, no random UUIDs. Per
 //! `.claude/rules/testing.md`, store tests must be deterministic.
 
-use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, IrEvent};
+use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, IrEvent, ProducerRole};
 use std::collections::BTreeMap;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -49,9 +49,33 @@ pub(crate) fn event_at(
     }
 }
 
-/// A minimal coverage manifest.
+/// Derive a [`ProducerRole`] from a fixture producer name.
+///
+/// Store fixtures name producers `adapter-*`, `observer-*`, or
+/// `probe-*`. Rather than thread a role through ~20 call sites, we read
+/// it off that convention — but an unrecognized name **panics** instead
+/// of defaulting, because a silently-wrong role is exactly the failure
+/// `ProducerRole` was introduced to prevent (see
+/// `certificate-contract.md` §Coverage-Deficit Rule).
+pub(crate) fn role_for(producer: &str) -> ProducerRole {
+    if producer.contains("observer") {
+        ProducerRole::Observer
+    } else if producer.contains("adapter") {
+        ProducerRole::Adapter
+    } else if producer.contains("probe") {
+        ProducerRole::Probe
+    } else {
+        panic!(
+            "fixture producer `{producer}` must contain `adapter`, `observer`, or `probe` \
+             so its ProducerRole is unambiguous"
+        )
+    }
+}
+
+/// A minimal coverage manifest. Role is derived via [`role_for`].
 pub(crate) fn manifest(producer: &str, version: &str, emits: &[&str]) -> CoverageManifest {
     CoverageManifest {
+        role: role_for(producer),
         producer: producer.to_string(),
         version: version.to_string(),
         platforms: Vec::new(),

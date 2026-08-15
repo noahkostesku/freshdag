@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, IrEvent};
+use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, IrEvent, ProducerRole};
 use freshdag_store::{ProducerKey, Store};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -19,8 +19,24 @@ use uuid::Uuid;
 const ADAPTER: &str = "freshdag-adapter-claude";
 const OBSERVER: &str = "freshdag-observer-scripted";
 
+/// Derive the role from the fixture producer name. An unrecognized name
+/// panics rather than defaulting — a silently-wrong role is the exact
+/// failure `ProducerRole` exists to prevent.
+fn role_for(producer: &str) -> ProducerRole {
+    if producer.contains("observer") {
+        ProducerRole::Observer
+    } else if producer.contains("adapter") {
+        ProducerRole::Adapter
+    } else if producer.contains("probe") {
+        ProducerRole::Probe
+    } else {
+        panic!("fixture producer `{producer}` must name its role")
+    }
+}
+
 fn manifest(producer: &str, version: &str, emits: &[&str]) -> CoverageManifest {
     CoverageManifest {
+        role: role_for(producer),
         producer: producer.to_string(),
         version: version.to_string(),
         platforms: Vec::new(),
