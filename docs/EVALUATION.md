@@ -60,11 +60,22 @@ prose into a test.
 ### Reason-pinned assertions (invariant #6 enforcement)
 
 An `expected.json` for any fixture whose expected `status.value !=
-valid` MUST pin `status.reasons[]` — specifically the reason codes
-and the dependency keys they refer to, not just the status value.
-Rationale: a broken FreshDAG that returned `stale` on every check
-would pass every non-`valid` fixture unless we pin the *why*. Fixtures
-that only assert on `status.value` are non-load-bearing.
+valid` MUST pin `status.reasons[]` — specifically each entry's
+`reason` (a member of the closed kebab-case `ReasonCode` vocabulary in
+`docs/contracts/certificate-contract.md §Reason Codes`) and its
+`dependency_key`, not just the status value. Rationale: a broken
+FreshDAG that returned `stale` on every check would pass every
+non-`valid` fixture unless we pin the *why*. Fixtures that only assert
+on `status.value` are non-load-bearing.
+
+Two consequences of the vocabulary being closed. First, assertions
+compare `reason` for equality against a code — never a substring match
+against prose, and never against `detail`, which is non-normative and
+MUST NOT appear in any assertion that decides pass/fail. Second,
+`status.reasons[]` ordering is contractual (edge-scoped reasons in
+`depends_on[]` order, artifact-scoped reasons after them, the latter
+carrying `dependency_key: ""`), so pinning `reasons[0]` is a
+well-defined assertion rather than a bet on iteration order.
 
 ### Fixtures 4/7/8/10 — rewordings
 
@@ -79,8 +90,9 @@ originally specified. The current spec:
   adapter records the dependency as `volatile`; certificate emission
   asserts the value cannot promote to `valid`.
 - **`volatile-unknown-after-ttl`** — advance a fake clock past the
-  TTL; assert `status.value = unknown` and the reason names the
-  volatile edge.
+  TTL; assert `status.value == "unknown"`,
+  `status.reasons[0].reason == "ttl-expired"`, and that the same
+  entry's `dependency_key` names the volatile edge.
 - **`heuristic-probe-failure`** — ships an in-process HTTP server
   bound to `127.0.0.1:0`; the server returns 500 during check; assert
   `status.reasons[0].reason == "probe-unknown"` and the dependency key.
