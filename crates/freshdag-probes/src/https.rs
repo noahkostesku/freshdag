@@ -40,6 +40,9 @@ pub mod report;
 pub mod reqwest_transport;
 pub mod transport;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::sync::Arc;
@@ -406,7 +409,7 @@ impl HttpsProbe {
         let plan = self.plan(key, recorded_fp)?;
 
         let settled = self.fetch(&original, &plan, ctx)?;
-        let classification = Self::classify(settled.headers(), ctx);
+        let classification = Self::classify(settled.headers(), ctx)?;
 
         if let Some(ct) = settled.headers().get("Content-Type") {
             ctx.content_type = Some(ct.to_string());
@@ -617,13 +620,29 @@ impl HttpsProbe {
 
     /// Derive the observed validator and trust class from the final
     /// response's headers.
-    fn classify(headers: &Headers, ctx: &mut Ctx) -> Classification {
+    fn classify(headers: &Headers, ctx: &mut Ctx) -> Result<Classification, Unresolved> {
         let raw_etags = headers.get_all("ETag");
         if raw_etags.len() > 1 {
             ctx.diag(
                 DiagnosticCode::DuplicateEtag,
                 format!("{} ETag header fields", raw_etags.len()),
             );
+            // RFC 9110 §8.8.3 allows exactly one `ETag` field. Repeated
+            // fields that AGREE are merely sloppy; repeated fields that
+            // DISAGREE mean the response has no single validator, and
+            // there is no principled way to choose. Taking the first
+            // would let a server whose first field happens to echo our
+            // `If-None-Match` manufacture a `Match` out of an
+            // ambiguity — an invariant-#7 hole. Refuse instead.
+            let mut distinct: Vec<&str> = raw_etags.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            if distinct.len() > 1 {
+                return Err(Unresolved::new(
+                    format!("ambiguous-etag distinct-fields={}", distinct.len()),
+                    false,
+                ));
+            }
         }
         let etag = match raw_etags.first().map(|raw| parse_etag(raw)) {
             Some(Ok(e)) => Some(e),
@@ -670,12 +689,12 @@ impl HttpsProbe {
             TrustClass::Volatile
         };
 
-        Classification {
+        Ok(Classification {
             etag,
             last_modified,
             cache_control,
             trust_class,
-        }
+        })
     }
 
     /// `304 Not Modified` — the server explicitly asserts unchanged.
