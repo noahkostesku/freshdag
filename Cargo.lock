@@ -309,7 +309,10 @@ dependencies = [
  "freshdag-core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
+ "time",
+ "uuid",
 ]
 
 [[package]]
