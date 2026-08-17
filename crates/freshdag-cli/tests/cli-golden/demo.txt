@@ -64,11 +64,15 @@ Why (1 reason, in the certificate's contractual order):
   1. coverage-deficit  —  (this artifact as a whole)
      Something happened during this computation that no registered
      producer claims to observe, so its silence cannot be read as
-     "nothing happened". The usual cause is a `bash` or `task`
-     invocation: only a sub-agent-layer observer can see the files a
-     subprocess reads and writes, and v0 ships no observer backend for
-     macOS. FreshDAG will not call an artifact valid on the strength
-     of effects nobody watched, so this is reported as unknown.
+     "nothing happened". Two shapes reach here: an effect kind that
+     nothing in the coverage list below declares it emits, or a
+     `bash` or `task` command run with no observer-role producer
+     covering the filesystem. Only a sub-agent-layer observer sees
+     what a subprocess reads and writes, and where no observer
+     backend covers this platform FreshDAG reports the gap rather
+     than papering over it. It will not call an artifact valid on
+     the strength of effects nobody watched, so this is reported as
+     unknown.
      context: undischarged-observation-obligation tool_kind=bash
 
 Dependencies (1):

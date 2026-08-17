@@ -81,14 +81,30 @@ fn prose(code: ReasonCode) -> &'static str {
              The recorded trust class was demoted and the dependency must be\n\
              re-observed before it can be trusted again."
         }
+        // Names the condition, never an operating system. The sentence
+        // is static and one certificate away from every platform this
+        // binary runs on: `freshdag-observer` ships a real Linux
+        // backend, so "v0 ships no observer backend for macOS" was
+        // simply false there — and it was printed for every
+        // coverage-deficit reason, including `uncovered-effect-kinds`
+        // deficits with no `bash` or `task` anywhere near them. A
+        // sentence that is false on some runs of the product is worse
+        // than a vague one, and the honest-coverage story is the thing
+        // this project is selling. So it points at the coverage list
+        // the renderer has already printed, which is concrete, on
+        // screen, and true everywhere.
         ReasonCode::CoverageDeficit => {
             "Something happened during this computation that no registered\n\
              producer claims to observe, so its silence cannot be read as\n\
-             \"nothing happened\". The usual cause is a `bash` or `task`\n\
-             invocation: only a sub-agent-layer observer can see the files a\n\
-             subprocess reads and writes, and v0 ships no observer backend for\n\
-             macOS. FreshDAG will not call an artifact valid on the strength\n\
-             of effects nobody watched, so this is reported as unknown."
+             \"nothing happened\". Two shapes reach here: an effect kind that\n\
+             nothing in the coverage list below declares it emits, or a\n\
+             `bash` or `task` command run with no observer-role producer\n\
+             covering the filesystem. Only a sub-agent-layer observer sees\n\
+             what a subprocess reads and writes, and where no observer\n\
+             backend covers this platform FreshDAG reports the gap rather\n\
+             than papering over it. It will not call an artifact valid on\n\
+             the strength of effects nobody watched, so this is reported as\n\
+             unknown."
         }
         ReasonCode::ProducerMissingFromCoverage => {
             "An event here came from a producer that never registered a\n\
@@ -330,14 +346,41 @@ mod tests {
     }
 
     #[test]
-    fn the_coverage_deficit_sentence_names_the_platform_gap() {
+    fn the_coverage_deficit_sentence_names_the_condition() {
         let text = prose(ReasonCode::CoverageDeficit);
-        for needle in ["bash", "observer", "macOS", "unknown"] {
+        for needle in [
+            "bash",
+            "observer",
+            "sub-agent-layer",
+            "coverage list",
+            "unknown",
+        ] {
             assert!(
                 text.contains(needle),
                 "the coverage-deficit sentence must mention `{needle}`; \
-                 it is the product's honest-coverage story"
+                 it is the product's honest-coverage story and must stay \
+                 concrete about what was not observed"
             );
+        }
+    }
+
+    /// The sentence is static and the product is not single-platform:
+    /// `freshdag-observer` ships a real Linux backend, so a hardcoded
+    /// "no observer backend for macOS" was false on Linux — and it was
+    /// printed for every coverage deficit, including effect-kind
+    /// deficits with no `bash` or `task` involved. Name the condition,
+    /// not an OS.
+    #[test]
+    fn no_prose_hardcodes_an_operating_system() {
+        for code in ALL_CODES {
+            let text = prose(*code);
+            for os in ["macOS", "Linux", "Windows", "darwin", "linux", "win32"] {
+                assert!(
+                    !text.contains(os),
+                    "prose for {code} names `{os}`; a static sentence cannot \
+                     know which platform it is printed on"
+                );
+            }
         }
     }
 
