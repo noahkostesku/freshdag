@@ -642,6 +642,82 @@ fn the_manifest_covers_every_kind_the_adapter_can_actually_emit() {
     }
 }
 
+/// Pin every `PartialReason` in the manifest.
+///
+/// Before this test the manifest's reasons had **zero** coverage: the
+/// tests asserted note *text* only, which is the free-text half no
+/// consumer may decide on. The machine-readable half — the half that
+/// reaches the certificate and that a third-party rechecker acts on —
+/// was unpinned, and that is how `tool.completed` shipped as
+/// `over-approximates`, the sole discharging reason in the crate, on a
+/// claim its own compile path contradicts.
+#[test]
+fn every_partial_entry_declares_the_reason_it_was_ratified_with() {
+    use freshdag_core::ir::PartialReason;
+
+    let manifest = coverage_manifest();
+    let expected = [
+        ("fs.read", PartialReason::UnderApproximates),
+        ("fs.write", PartialReason::UnderApproximates),
+        ("fs.*", PartialReason::BlindInScope),
+        ("tool.completed", PartialReason::UnderApproximates),
+        ("computation.*", PartialReason::UnderApproximates),
+    ];
+
+    for (pattern, reason) in expected {
+        let entry = manifest
+            .partial
+            .get(pattern)
+            .unwrap_or_else(|| panic!("`{pattern}` must carry a partial declaration"));
+        assert_eq!(
+            entry.reason, reason,
+            "`{pattern}` changed reason; a producer's own owner ratifies that \
+             (ADR 0011, Amendment, Correction 1), so update the ratification, not just this test"
+        );
+    }
+    assert_eq!(
+        manifest.partial.len(),
+        expected.len(),
+        "a partial entry was added or removed without ratifying its reason"
+    );
+}
+
+/// **No kind this adapter declares partial may discharge an
+/// obligation.**
+///
+/// `role: Adapter` already bars this producer from the engine's one
+/// discharge site, but `CoverageManifest::discharges` is public and
+/// role-free: an `over-approximates` entry returns `true` to any future
+/// obligation keyed on another kind, and to any third-party rechecker
+/// reading `observation_coverage` off a certificate — which is the
+/// entire point of ADR 0011 §Decision 2. "It is unreachable today" is
+/// true; "it is inert" is not.
+///
+/// Deliberately scoped to the declared-partial kinds. `tool.invoked`
+/// DOES discharge and should: this adapter is the authoritative producer
+/// of tool events and declares no partiality on that kind. The claim
+/// under test is narrower — wherever this adapter has admitted a gap,
+/// that admission must never read as a safety guarantee.
+#[test]
+fn nothing_this_adapter_declares_partial_discharges() {
+    let manifest = coverage_manifest();
+    for kind in [
+        EventKind::FsRead,
+        EventKind::FsWrite,
+        EventKind::FsStat,
+        EventKind::ToolCompleted,
+        EventKind::ComputationStarted,
+        EventKind::ComputationEnded,
+    ] {
+        assert!(
+            !manifest.discharges(kind),
+            "`{}` is declared partial yet discharges; an admission of a gap \
+             must never read as a guarantee",
+            kind.as_wire_str()
+        );
+    }
+}
+
 #[test]
 fn the_manifest_declares_bash_and_task_blindness_in_writing() {
     let manifest = coverage_manifest();
