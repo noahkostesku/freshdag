@@ -179,6 +179,23 @@ fn run_gate(
     authority: CoverageAuthority,
     accounted_missing: &BTreeSet<String>,
 ) -> Result<GateOutcome, EngineError> {
+    // `check_coverage_deficit` returns on the *first* producer missing
+    // from `observation_coverage`. That is fine for core — one violation
+    // is one violation — but the engine asks a different question of the
+    // answer: "is this a gap I already know about, or a bug in my own
+    // assembly?" Consulting only the first offender lets a pre-accounted
+    // producer that happens to appear earlier in the stream mask a
+    // genuinely unaccounted one, and `CoverageAssemblyBug` — which must
+    // be fatal — silently becomes a downgrade. So the engine audits
+    // every missing producer against its own accounting, before
+    // interpreting whichever one core reported.
+    if matches!(authority, CoverageAuthority::EngineAssembled) {
+        if let Some(producer) = unaccounted_producers(certificate, events, accounted_missing).next()
+        {
+            return Err(EngineError::CoverageAssemblyBug { producer });
+        }
+    }
+
     let Err(violation) = certificate.check_coverage_deficit(events) else {
         return Ok(GateOutcome {
             reasons: Vec::new(),
@@ -195,7 +212,11 @@ fn run_gate(
                     ),
                 });
             };
-            // The dual-use split, made explicit.
+            // The dual-use split. On the emission path the audit above
+            // already proved every missing producer is accounted for, so
+            // reaching here with an unaccounted one would mean the two
+            // disagree — which is a defect in this function, not a fact
+            // about the world.
             if matches!(authority, CoverageAuthority::EngineAssembled)
                 && !accounted_missing.contains(producer)
             {
@@ -232,6 +253,31 @@ fn run_gate(
             Err(EngineError::MalformedCertificate { source: violation })
         }
     }
+}
+
+/// Every producer that emitted an event, is absent from
+/// `observation_coverage`, and is not one the engine pre-accounted for.
+///
+/// Sorted and deduplicated, so which producer a `CoverageAssemblyBug`
+/// names is a function of the inputs rather than of event order — the
+/// error is part of the engine's observable behaviour and fixtures may
+/// pin it.
+fn unaccounted_producers<'a>(
+    certificate: &'a Certificate,
+    events: &'a [IrEvent],
+    accounted_missing: &'a BTreeSet<String>,
+) -> impl Iterator<Item = String> + 'a {
+    let declared: BTreeSet<&str> = certificate
+        .observation_coverage
+        .iter()
+        .map(|c| c.producer.as_str())
+        .collect();
+    events
+        .iter()
+        .map(|e| e.producer.clone())
+        .filter(move |p| !declared.contains(p.as_str()) && !accounted_missing.contains(p))
+        .collect::<BTreeSet<String>>()
+        .into_iter()
 }
 
 /// Aggregate, gate, and assemble. The only path to a `Certificate` in

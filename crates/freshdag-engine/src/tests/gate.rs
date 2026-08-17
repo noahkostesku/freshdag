@@ -185,6 +185,92 @@ fn an_accounted_missing_producer_downgrades_on_the_emission_path_too() {
     assert_eq!(certificate.status.value, ValidityStatus::Unknown);
 }
 
+/// D8: one pre-accounted missing producer must not mask a genuinely
+/// unaccounted one.
+///
+/// `Certificate::check_coverage_deficit` returns on the *first* producer
+/// missing from `observation_coverage`. If that first one is a gap the
+/// engine already knows about, the gate took the downgrade branch and
+/// `CoverageAssemblyBug` — which the design says is fatal — was never
+/// raised, however many real assembly bugs followed it in the stream.
+///
+/// The interleaving is the whole test: `accounted-ghost` sorts and
+/// appears before `rogue-producer`, so a first-miss check sees only the
+/// benign one.
+#[test]
+fn an_accounted_missing_producer_does_not_mask_an_unaccounted_one() {
+    let events = vec![event("accounted-ghost"), event("rogue-producer")];
+    let mut accounted = BTreeSet::new();
+    accounted.insert("accounted-ghost".to_string());
+    let err = seal(input(
+        &events,
+        coverage("freshdag-adapter-claude"),
+        CoverageAuthority::EngineAssembled,
+        accounted,
+        Vec::new(),
+        Some(hash("recipe")),
+    ))
+    .expect_err("an unaccounted producer is an engine bug whichever order it arrives in");
+    assert_eq!(
+        err,
+        EngineError::CoverageAssemblyBug {
+            producer: "rogue-producer".to_string()
+        }
+    );
+}
+
+/// The same two producers in the other order, so the test above cannot
+/// pass merely because the engine looks at the last event instead of the
+/// first. Which producer is named must not depend on event order either.
+#[test]
+fn the_coverage_assembly_bug_is_independent_of_event_order() {
+    let mut accounted = BTreeSet::new();
+    accounted.insert("accounted-ghost".to_string());
+    for events in [
+        vec![event("accounted-ghost"), event("rogue-producer")],
+        vec![event("rogue-producer"), event("accounted-ghost")],
+    ] {
+        let err = seal(input(
+            &events,
+            coverage("freshdag-adapter-claude"),
+            CoverageAuthority::EngineAssembled,
+            accounted.clone(),
+            Vec::new(),
+            Some(hash("recipe")),
+        ))
+        .expect_err("unaccounted producer");
+        assert_eq!(
+            err,
+            EngineError::CoverageAssemblyBug {
+                producer: "rogue-producer".to_string()
+            }
+        );
+    }
+}
+
+/// The re-check path is untouched: a certificate read off a document is
+/// not the engine's assembly, so missing producers stay a downgrade
+/// however many there are.
+#[test]
+fn multiple_missing_producers_still_downgrade_on_the_document_path() {
+    let events = vec![event("ghost-one"), event("ghost-two")];
+    let certificate = seal(input(
+        &events,
+        coverage("freshdag-adapter-claude"),
+        CoverageAuthority::FromDocument,
+        BTreeSet::new(),
+        Vec::new(),
+        Some(hash("recipe")),
+    ))
+    .expect("a portable certificate with uninterpretable silences is still emittable");
+    assert_eq!(certificate.status.value, ValidityStatus::Unknown);
+    assert!(certificate
+        .status
+        .reasons
+        .iter()
+        .any(|r| r.reason == ReasonCode::ProducerMissingFromCoverage));
+}
+
 /// A structural defect emits nothing. `ReasonMapping::StructuralDefect`
 /// exists precisely so this cannot be quietly downgraded.
 #[test]
