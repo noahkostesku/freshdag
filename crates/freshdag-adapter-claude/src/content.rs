@@ -22,20 +22,47 @@
 //! behaves exactly as before. [`DiskContent`] is installed only by
 //! `Compiler::production`.
 //!
-//! # Why hashing *before* the read is sound
+//! # What hashing *before* the read does and does not guarantee
 //!
-//! The fingerprint is taken at `PreToolUse`, so it describes the file
-//! as it stood a moment before the tool ran. Two things can go wrong
-//! and both fail safe:
+//! An earlier revision of this comment claimed the pre-read fingerprint
+//! "can only cause spurious staleness, never spurious freshness". **That
+//! was wrong**, and a verifier reproduced two counter-examples. The
+//! claim enumerated only *temporal* failure modes and missed the
+//! *identity* one: the fingerprint describes whichever file this
+//! adapter resolved, which is not always the file the tool opened.
+//!
+//! Safe, as originally argued:
 //!
 //! - **The tool call is denied or fails.** A dependency is recorded
 //!   that was never actually read. That is over-approximation: a
 //!   spurious dependency yields spurious staleness, which invariant #15
 //!   explicitly prefers.
-//! - **The file changes between this hook and the read.** The recorded
-//!   fingerprint is of the earlier bytes, so a later check compares
-//!   against those and reports drift. Again spurious staleness, never
-//!   spurious freshness.
+//! - **The file changes between this hook and the read, and stays
+//!   changed.** The recorded fingerprint is of the earlier bytes, so a
+//!   later check reports drift. Spurious staleness again.
+//!
+//! **Not safe:**
+//!
+//! - **Symlinked directories.** [`crate::paths::resolve`] canonicalizes
+//!   *lexically* and does not resolve symlinks, but `std::fs` does. When
+//!   a `..` traverses a symlinked directory the two disagree, and this
+//!   module is handed the lexical path — so it records and fingerprints
+//!   a file the tool never opened, self-consistently and at
+//!   `trust_class: exact`. Changing the real input then produces no
+//!   drift. Before fingerprinting, such a read carried no hash and was
+//!   discarded as `NoFingerprint`; this turns a known blindness into an
+//!   affirmative false statement.
+//! - **Change-and-revert between hook and read.** If the file is
+//!   modified after hashing, consumed by the tool in its modified form,
+//!   and later restored to the hashed bytes, no drift is ever reported.
+//!   Config regeneration and `git checkout` round-trips do exactly this.
+//!
+//! Both are recorded in this adapter's `known_limitations`, because a
+//! consumer reading the certificate has no other way to learn them. The
+//! real fix for the first is for path resolution and content resolution
+//! to agree — either both lexical or both realpath — which is a change
+//! to `paths::resolve` and moves every golden, so it is not attempted
+//! here.
 //!
 //! What it must never do is block the runtime (adapter-contract
 //! §Errors and Backpressure), so [`DiskContent`] refuses to hash

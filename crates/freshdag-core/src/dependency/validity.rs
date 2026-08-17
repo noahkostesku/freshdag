@@ -262,6 +262,29 @@ pub enum ReasonCode {
     /// along that invariant #9 "caps such computations below `valid`";
     /// nothing implemented the cap. This is that cap.
     RecipeIdentityUnavailable,
+    /// Artifact-scoped. The store identified an observation that names a
+    /// dependency but could not promote it to a verifiable edge, so the
+    /// dependency exists and its state is unknown.
+    ///
+    /// `freshdag-store` records these as `ExcludedEdge`s whose
+    /// `ExclusionReason::is_unproven_dependency()` is true — no
+    /// fingerprint was observed, a `volatile` observation arrived with
+    /// no TTL, or the payload was malformed. They are deliberately *not*
+    /// dependencies: constructing one would fabricate the evidence
+    /// invariant #7 requires.
+    ///
+    /// But the engine evaluated only `dependencies` and never consulted
+    /// `excluded`, so such an observation vanished from the certificate
+    /// entirely. A computation that read four files and produced a
+    /// fingerprint for three yielded a certificate over three verified
+    /// edges and no mention of the fourth — `no-dependencies-observed`
+    /// fires only when the set is *empty*. This code is how the
+    /// certificate says "there is an input here I could not check".
+    ///
+    /// Read-after-own-write and impure reads are excluded for the
+    /// opposite reason — they are positive findings that no external
+    /// dependency exists at that key — and do not raise this.
+    UnprovenDependency,
 }
 
 impl ReasonCode {
@@ -293,6 +316,7 @@ impl ReasonCode {
             Self::VolatileWithinTtlUnprobed => "volatile-within-ttl-unprobed",
             Self::DependencyChangedDuringComputation => "dependency-changed-during-computation",
             Self::RecipeIdentityUnavailable => "recipe-identity-unavailable",
+            Self::UnprovenDependency => "unproven-dependency",
         }
     }
 
@@ -309,7 +333,8 @@ impl ReasonCode {
             Self::CoverageDeficit
             | Self::ProducerMissingFromCoverage
             | Self::NoDependenciesObserved
-            | Self::RecipeIdentityUnavailable => true,
+            | Self::RecipeIdentityUnavailable
+            | Self::UnprovenDependency => true,
             Self::Drift
             | Self::ProbeUnknown
             | Self::NoProbeAvailable

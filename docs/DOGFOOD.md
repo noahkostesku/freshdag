@@ -92,6 +92,37 @@ refused at exit 5.
 was no obvious moment to run `freshdag mark`, and nothing prompted for
 one. The command exists; the workflow around it does not.
 
+### Correction, 2026-08-17 (verifier review)
+
+**The 10% above is an upper bound, and the figures are miscounted in the
+optimistic direction.** Three defects found after this entry was
+written:
+
+1. **Subagent delegations were counted as observable.** This runtime
+   emits the tool as `Agent`; the adapter recognized only `Task`, so a
+   delegation was classified `builtin`, raised **no** observation
+   obligation, and counted as a tool FreshDAG can see into. Fixed;
+   historical events in this store keep their original classification,
+   because the log is append-only.
+2. **`observable_fraction` measures the weaker quantity.** It counts
+   tool calls the adapter can see into, not calls able to yield a
+   dependency. Only `Read` can produce an edge — `fs.write` is an
+   output. At this session's cutoff that is **2 of 60 (3.3%)**, not
+   6 of 60.
+3. `mcp`, `skill`, and a `tool.invoked` carrying no `tool_kind` at all
+   are likewise counted as observable.
+
+The arithmetic in the table below was independently re-derived from the
+raw JSONL by a verifier and agreed exactly; what was wrong is the
+*classification feeding it*, not the counting. Corrected figures are not
+back-filled here — the entry stands as recorded, with this correction
+appended, because rewriting a measurement after the fact is how a
+dogfood log stops being evidence.
+
+**The direction of every error was the same: reported coverage was
+better than reality.** That matters because this number argues about
+whether to build an observer, and the bias ran against building one.
+
 ### Honest reading
 
 `BUILD_PLAN` §6.2 pre-committed to the risk: *"The honest outcome may be
@@ -121,7 +152,9 @@ sessions 2–10 rather than a build decision made on this entry alone.
 ### Open, and not fixed by this entry
 
 - `valid` is unreachable through this adapter (no recipe hash), so the
-  reachable states are `stale` and `unknown`.
+  reachable states are `stale` and `unknown`. Note this is the *only*
+  thing preventing several latent freshness defects from becoming live;
+  it is masking, not safety.
 - No `verifier` pass has run on any of the day's work.
 - The thirteenth reason code, for capping on missing recipe identity,
   is still owed as a contract change.

@@ -110,7 +110,25 @@ out of date. A test pins this.
   from a crash to a certificate whose reasons name the ceiling.
 - The reason count moves 12 → 13. `ALL_REASON_CODES`, both schemas, the
   contract table, and the CLI's prose renderer are updated in the same
-  PR; each is guarded by a test that fails if one drifts from another.
+  PR.
+
+  **Corrected 2026-08-17 after verifier review.** This originally read
+  "each is guarded by a test that fails if one drifts from another",
+  which is false and was demonstrated so: a verifier added a fourteenth
+  variant to the enum, deliberately omitted it from `ALL_REASON_CODES`
+  and both schemas, and the whole core suite still passed. The
+  `assert_eq!(ALL_REASON_CODES.len(), 13)` "guard" is a hand-maintained
+  count that an enum addition does not perturb, and
+  `schema_reason_enums_match_rust` compares the schemas against
+  `ALL_REASON_CODES` rather than the enum — so a break at the top of the
+  chain hides the whole chain.
+
+  The only real guard is the compiler: the exhaustive `match` in
+  `freshdag-cli`'s `prose()` fails to build. The contract table is
+  guarded by nothing at all. Closing this properly means deriving the
+  variant list rather than hand-maintaining it, or round-tripping every
+  schema enum member through serde so the schema becomes the source of
+  truth. Not done here; recorded so the claim is not relied on.
 
 ## Rejected alternatives
 

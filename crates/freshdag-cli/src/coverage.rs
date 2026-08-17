@@ -114,8 +114,16 @@ pub struct Report {
 }
 
 impl Report {
-    /// Of the actions this session took, what fraction produced usable
-    /// dependency evidence?
+    /// Of the actions this session took, what fraction were ones this
+    /// adapter can see into at all?
+    ///
+    /// **Not the same as "produced usable dependency evidence"**, which
+    /// is what this doc comment used to claim. Only `Read` can yield a
+    /// dependency edge — an `fs.write` is an output, never a dependency
+    /// — so the fraction of calls able to contribute evidence is
+    /// strictly smaller than this number, and at the first dogfood
+    /// measurement it was 2/60 rather than 6/60. This is the weaker,
+    /// more generous quantity; treat it as an upper bound.
     ///
     /// This is the number the observer decision turns on, and it is
     /// deliberately pessimistic: a `bash` call that touched nothing

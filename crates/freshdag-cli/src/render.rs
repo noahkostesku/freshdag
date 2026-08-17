@@ -133,6 +133,13 @@ fn prose(code: ReasonCode) -> &'static str {
             "This computation produced an artifact without a single observed\n\
              dependency. Absence of evidence is not evidence of freshness."
         }
+        ReasonCode::UnprovenDependency => {
+            "Something this computation read could not be fingerprinted, so it\n\
+             is an input whose state is unknown. It is not listed among the\n\
+             dependencies below, because recording it as one would mean\n\
+             inventing evidence about it — but it exists, and it was not\n\
+             checked."
+        }
         ReasonCode::RecipeIdentityUnavailable => {
             "This computation carries no recipe identity, so nothing can tie\n\
              the artifact to a reproducible way of making it. Its dependencies\n\

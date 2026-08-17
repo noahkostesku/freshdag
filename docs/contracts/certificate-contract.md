@@ -169,6 +169,7 @@ empty string `""` (not `null`, not omitted).
 | `no-dependencies-observed` | artifact | The computation produced an artifact with zero observed dependencies. Absence of evidence is not evidence of freshness. |
 | `dependency-changed-during-computation` | edge | The same dependency was observed more than once within one computation with different fingerprints: the input changed while the agent was reading it. The recorded fingerprint is one of at least two and nothing says which the computation consumed, so the edge is `unknown` and the artifact can never be `valid`. |
 | `recipe-identity-unavailable` | artifact | The computation carries no `recipe_hash`, so no certificate about it may claim `valid` or `likely-valid` (§Field Rules, invariant #9). The dependencies may all have verified; what is missing is the identity of the computation they belong to. Some runtimes cannot supply one at all — Claude Code exposes no recipe — so for those this caps every artifact they produce. The engine **caps at `unknown`** rather than refusing to emit: the absence is a fact about the evidence, not a tool failure. |
+| `unproven-dependency` | artifact | The store identified an observation naming a dependency but could not promote it to a verifiable edge — no fingerprint was observed, a `volatile` observation arrived with no TTL, or the payload was malformed. The dependency exists and its state is unknown, so it is deliberately absent from `depends_on` (recording it would fabricate evidence) and named here instead. `detail` carries the affected keys. Read-after-own-write and impure reads do NOT raise this: they are positive findings that no external dependency exists at that key. |
 
 Three vocabularies in FreshDAG share spellings and must not be
 conflated: reason codes (this table), probe results
@@ -374,6 +375,23 @@ fields) continue to land in place.
 
 ### Changelog
 
+- **v0.1 — `unproven-dependency` added.** Fourteenth reason code,
+  artifact-scoped. The store has always recorded observations it could
+  not promote to edges, with `ExclusionReason::is_unproven_dependency()`
+  distinguishing "a dependency exists here but is unverifiable" from "no
+  dependency exists here". The engine never consulted them: it evaluated
+  `node.dependencies` only, so an input the producer saw but could not
+  fingerprint was absent from the certificate entirely, and
+  `no-dependencies-observed` fires only when the set is empty. A
+  computation with three verified edges and one unfingerprinted read
+  therefore certified over the three in silence. Found by verifier
+  review 2026-08-17; the path became reachable when the Claude adapter
+  started fingerprinting reads, since its byte cap and unreadable-file
+  handling both produce exactly this exclusion. Additive on the wire and
+  reader-breaking on the same terms as the entry below. Artifacts that
+  were `valid` or `likely-valid` with an unproven exclusion present are
+  now capped at `unknown`, which is the point.
+
 - **v0.1 — `recipe-identity-unavailable` added.** Thirteenth reason
   code, artifact-scoped. Previously the engine *refused to seal* a
   certificate whose status would be `valid`/`likely-valid` without a
@@ -383,8 +401,15 @@ fields) continue to land in place.
   The engine now caps at `unknown` and attaches this code. Additive on
   the wire; a consumer holding the pre-change v0.1 validator rejects a
   certificate carrying it, because JSON Schema enums are closed. No
-  artifact that was `valid` becomes less valid: the affected
-  certificates could not be emitted at all before. See ADR 0014.
+  artifact that was `valid` becomes less valid. **Corrected 2026-08-17
+  after verifier review:** an earlier wording here claimed "the affected
+  certificates could not be emitted at all before", which is false. A
+  certificate already capped by a coverage code *was* emitted before —
+  the old refusal only fired on `valid`/`likely-valid`, and such a
+  certificate was already `unknown`. It now carries an additional reason
+  and therefore a different `cert_id`, since `cert_id` hashes
+  `status.reasons[]`. Any stored certificate of that shape will not
+  compare equal across the upgrade. See ADR 0014.
 - **v0.1 — reason-code enum widened 10 → 12** (recorded late).
   `volatile-within-ttl-unprobed` and
   `dependency-changed-during-computation` were added by ADR 0009 without
