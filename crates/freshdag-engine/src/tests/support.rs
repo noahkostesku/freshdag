@@ -15,7 +15,7 @@ use freshdag_store::CoverageRegistry;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::{CheckOutcome, Engine, FixedClock, ProbeRegistry};
+use crate::{CheckOutcome, Engine, FrozenClock, ProbeRegistry};
 
 pub const ADAPTER: &str = "freshdag-adapter-claude";
 pub const OBSERVER: &str = "freshdag-observer-fsatrace";
@@ -329,7 +329,7 @@ impl Fixture {
         probes: ProbeRegistry,
         tune: impl FnOnce(crate::EngineBuilder) -> crate::EngineBuilder,
     ) -> TestEngine {
-        let clock = Arc::new(FixedClock::new(
+        let clock = Arc::new(FrozenClock::new(
             Self::base_ts() + time::Duration::seconds(300),
         ));
         let engine = tune(
@@ -351,7 +351,7 @@ impl Fixture {
 
 pub struct TestEngine {
     pub engine: Engine,
-    pub clock: Arc<FixedClock>,
+    pub clock: Arc<FrozenClock>,
     pub artifact: ArtifactId,
     #[allow(dead_code)]
     pub computation: ComputationId,

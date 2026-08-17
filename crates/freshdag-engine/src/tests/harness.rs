@@ -41,7 +41,7 @@ use freshdag_store::{CoverageRegistry, DerivedGraph};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use crate::{Engine, FixedClock, ProbeRegistry, ScriptedProbe};
+use crate::{Engine, FrozenClock, ProbeRegistry, ScriptedProbe};
 
 const ADAPTER_EMITS: &[&str] = &[
     "session.*",
@@ -286,7 +286,7 @@ pub struct Run {
     pub name: String,
     pub expected: Expected,
     pub engine: Engine,
-    pub clock: Arc<FixedClock>,
+    pub clock: Arc<FrozenClock>,
     pub artifact: ArtifactId,
     scripts: BTreeMap<String, (Arc<ScriptedProbe>, ProbeScript)>,
     recorded: BTreeMap<String, Dependency>,
@@ -338,7 +338,7 @@ impl Run {
             .map(|e| e.ts)
             .max()
             .expect("scenario has events");
-        let clock = Arc::new(FixedClock::new(last_ts + time::Duration::seconds(60)));
+        let clock = Arc::new(FrozenClock::new(last_ts + time::Duration::seconds(60)));
 
         let artifact = events
             .iter()

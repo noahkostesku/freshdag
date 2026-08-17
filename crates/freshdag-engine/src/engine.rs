@@ -46,7 +46,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::antithrash::{TrustLedger, TrustTransition};
-use crate::clock::{Clock, SystemClock};
+use crate::clock::{EvalClock, SystemClock};
 use crate::coverage;
 use crate::error::EngineError;
 use crate::registry::{NoProbe, ProbeIdentity, ProbeRegistry};
@@ -119,7 +119,7 @@ pub struct Engine {
     events: Vec<IrEvent>,
     graph: DerivedGraph,
     registry: ProbeRegistry,
-    clock: Arc<dyn Clock>,
+    clock: Arc<dyn EvalClock>,
     ledger: Mutex<TrustLedger>,
     max_volatile_ttl: std::time::Duration,
 }
@@ -1170,7 +1170,7 @@ pub struct EngineBuilder {
     events: Vec<IrEvent>,
     coverage: CoverageRegistry,
     registry: ProbeRegistry,
-    clock: Option<Arc<dyn Clock>>,
+    clock: Option<Arc<dyn EvalClock>>,
     max_volatile_ttl: Option<std::time::Duration>,
 }
 
@@ -1198,9 +1198,9 @@ impl EngineBuilder {
     }
 
     /// Supply the clock. Defaults to [`SystemClock`]; tests MUST inject
-    /// a [`FixedClock`](crate::FixedClock).
+    /// a [`FrozenClock`](crate::FrozenClock).
     #[must_use]
-    pub fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
+    pub fn clock(mut self, clock: Arc<dyn EvalClock>) -> Self {
         self.clock = Some(clock);
         self
     }

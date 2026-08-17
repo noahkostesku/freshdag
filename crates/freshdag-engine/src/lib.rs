@@ -28,7 +28,7 @@
 //!   observations before a trust escalation is adopted, explicit
 //!   demotion via `probe.trust_demoted`.
 //! - [`Engine`] — per-edge probe dispatch and aggregation.
-//! - [`Clock`] — injected; the engine never reads the wall clock
+//! - [`EvalClock`] — injected; the engine never reads the wall clock
 //!   ambiently, so TTL expiry is deterministic.
 //! - [`ScriptedProbe`] — fixture-only probe whose answers are supplied
 //!   rather than observed.
@@ -55,7 +55,7 @@ mod seal;
 mod tests;
 
 pub use antithrash::{TrustLedger, TrustTransition, ESCALATION_THRESHOLD};
-pub use clock::{Clock, FixedClock, SystemClock};
+pub use clock::{EvalClock, FrozenClock, SystemClock};
 pub use engine::{
     is_usable, CheckOutcome, Engine, EngineBuilder, DEFAULT_MAX_VOLATILE_TTL, ENGINE_PRODUCER,
     ENGINE_VERSION, MAX_CLOCK_SKEW,
