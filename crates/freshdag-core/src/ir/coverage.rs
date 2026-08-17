@@ -129,6 +129,20 @@ pub enum PartialReason {
     /// Fails unsafe: a missed read is a dependency edge that never
     /// reaches the certificate, so the artifact looks fresher than it
     /// is. Does not discharge.
+    ///
+    /// **Deliberately one bucket, however narrow the gap** (ADR 0012).
+    /// "Misses mmap reads" and "misses everything" are the same variant
+    /// on purpose: a bounded *mechanism* does not bound the *harm*,
+    /// because the one dependency missed may be the only one that
+    /// mattered. A finer member that discharged would be unsound, and
+    /// one that did not discharge would be inert — [`Self::discharges`]
+    /// is the whole machine-readable content of this vocabulary, so a
+    /// variant no decision reads is free text with a schema entry.
+    ///
+    /// The route out is to close the gap or to over-report instead of
+    /// missing: hashing a file at `open` and emitting a pessimistic
+    /// read turns a miss into a coarse over-report, which does
+    /// discharge (observer-contract §Required Behavior #4).
     UnderApproximates,
     /// Structurally cannot observe this kind within some scope — e.g.
     /// an adapter that sees tool inputs but nothing inside the

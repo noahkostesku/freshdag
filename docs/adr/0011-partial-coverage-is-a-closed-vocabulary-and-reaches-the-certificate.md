@@ -348,11 +348,22 @@ claims about anything in `crates/`. Consequences:
   above it. Same edit applies to every example manifest in
   `docs/contracts/`. `architect` does not make those edits here.
 
-**Open, escalated to the human, not decided:** `under-approximates`
-currently collapses "misses mmap reads" and "misses everything" into
-one non-discharging bucket. That is the conservative choice and
-invariant #15 supports it, but if the fsatrace gap is later closed to a
-narrow, bounded under-approximation, the vocabulary has no way to say
-so and the observer still cannot discharge. Whether a bounded/scoped
-under-approximation deserves a fourth member is a real question and
-deliberately out of scope here.
+**Escalated to the human — CLOSED 2026-08-17 by ADR 0012: no fourth
+member.** `under-approximates` collapses "misses mmap reads" and "misses
+everything" into one non-discharging bucket. That is the conservative
+choice and invariant #15 supports it, but if the fsatrace gap is later
+closed to a narrow, bounded under-approximation, the vocabulary has no
+way to say so and the observer still cannot discharge. Whether a
+bounded/scoped under-approximation deserves a fourth member was a real
+question and was deliberately out of scope here.
+
+ADR 0012 rules it out on a two-horned argument: a bounded member that
+*discharges* is unsound, because a bounded mechanism does not bound the
+harm — the one dependency missed may be the only one that mattered — and
+a bounded member that does *not* discharge is inert, since
+`PartialReason::discharges` is the whole machine-readable content of the
+vocabulary. It also records why the honesty-is-punitive argument does
+not transfer from §Rejected alternatives: under the blunt rule a
+producer could regain discharge by deleting a true note, so the
+incentive was to lie; here no documentation change regains discharge,
+only closing the gap does.
