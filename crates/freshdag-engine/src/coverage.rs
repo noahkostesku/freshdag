@@ -24,7 +24,7 @@
 use std::collections::BTreeSet;
 
 use freshdag_core::certificate::CoverageEntry;
-use freshdag_core::ir::{EventKind, IrEvent, ProducerRole};
+use freshdag_core::ir::{EventKind, IrEvent};
 
 /// The effect kinds the coverage-deficit rule ranges over: `fs.*`,
 /// `proc.*`, `net.*`.
@@ -80,18 +80,39 @@ pub fn effect_deficit_detail(deficit: &BTreeSet<EventKind>) -> String {
     format!("uncovered-effect-kinds={}", kinds.join(","))
 }
 
-/// Does any producer with `role: observer` declare `fs.*` coverage?
+/// Does any producer discharge the `bash`/`task` observation
+/// obligation?
 ///
-/// Only an observer discharges a `bash`/`task` obligation. An adapter
-/// declaring `fs.read`/`fs.write` does not, however broad its `emits`
-/// list — it synthesizes those from tool inputs it can see and is blind
-/// inside subprocesses by construction (ADR 0006).
+/// **This function contains no rule.** It is a named fold over
+/// [`CoverageEntry::discharges_subprocess_obligation`], which is the
+/// single implementation ADR 0011 §Decision 3 requires. If you are
+/// tempted to inline a condition here, that is the defect this
+/// delegation replaces.
+///
+/// It used to spell the rule itself, as
+/// `matches!(role, Observer) && (covers(FsRead) || covers(FsWrite))`,
+/// and that spelling was wrong in both of the ways the core method's
+/// own documentation calls unrepresentable through it:
+///
+/// - **`fs.write` substituted for `fs.read`.** Validity is about
+///   *inputs*. A producer that sees only writes contributes zero
+///   dependency edges, so the `||` discharged the obligation for a
+///   producer incapable of answering the question.
+/// - **`partial` was never consulted.** `covers` is purely syntactic.
+///   An observer declaring `fs.read` as `under-approximates` or
+///   `blind-in-scope` — which is what every observer in this repository
+///   declares today — satisfied this check while the certificate's own
+///   `check_coverage_deficit` refused it.
+///
+/// The second is the one that mattered: the engine and the certificate
+/// disagreed about the same certificate. The engine sealed a status the
+/// certificate's invariant check would then reject, which is the
+/// two-spellings failure ADR 0011 exists to end.
 #[must_use]
 pub fn has_fs_covered_observer(coverage: &[CoverageEntry]) -> bool {
-    coverage.iter().any(|c| {
-        matches!(c.role, ProducerRole::Observer)
-            && (c.covers(EventKind::FsRead) || c.covers(EventKind::FsWrite))
-    })
+    coverage
+        .iter()
+        .any(CoverageEntry::discharges_subprocess_obligation)
 }
 
 /// Deterministic `detail` for an undischarged `bash`/`task` obligation.
@@ -106,7 +127,7 @@ pub fn obligation_detail(tool_kinds: &BTreeSet<String>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use freshdag_core::ir::EventKindPattern;
+    use freshdag_core::ir::{EventKindPattern, PartialCoverage, PartialReason, ProducerRole};
     use time::OffsetDateTime;
     use uuid::Uuid;
 
@@ -233,6 +254,113 @@ mod tests {
             !has_fs_covered_observer(&probe),
             "a probe does not observe subprocess filesystem effects"
         );
+    }
+
+    /// An observer entry with a `partial` declaration on `fs.read`.
+    fn observer_with_fs_read_partial(reason: PartialReason) -> Vec<CoverageEntry> {
+        let mut e = entry("observer", ProducerRole::Observer, &["fs.read", "fs.write"]);
+        e.partial.insert(
+            "fs.read".to_string(),
+            PartialCoverage::new(reason, "declared gap"),
+        );
+        vec![e]
+    }
+
+    /// `fs.write` coverage must not substitute for `fs.read`.
+    ///
+    /// The old rule was `covers(FsRead) || covers(FsWrite)`. Validity is
+    /// about *inputs*: a producer that sees only writes contributes zero
+    /// dependency edges, so the disjunction discharged the obligation
+    /// for a producer that cannot answer the question even in principle.
+    #[test]
+    fn a_write_only_observer_does_not_discharge() {
+        let writes_only = vec![entry("observer", ProducerRole::Observer, &["fs.write"])];
+        assert!(
+            !has_fs_covered_observer(&writes_only),
+            "fs.write coverage contributes no dependency edges and must not discharge"
+        );
+
+        let reads = vec![entry("observer", ProducerRole::Observer, &["fs.read"])];
+        assert!(has_fs_covered_observer(&reads));
+    }
+
+    /// A declared gap on `fs.read` must not discharge.
+    ///
+    /// The old rule called `covers`, which is purely syntactic and never
+    /// reads `partial`. Every observer in this repository declares
+    /// `fs.read` non-dischargeably today, so this is the arm that was
+    /// actually wrong in practice, not just in principle.
+    #[test]
+    fn a_declared_gap_on_fs_read_does_not_discharge() {
+        for reason in [
+            PartialReason::UnderApproximates,
+            PartialReason::BlindInScope,
+        ] {
+            let coverage = observer_with_fs_read_partial(reason);
+            assert!(
+                coverage[0].covers(EventKind::FsRead),
+                "{reason}: the entry must still *claim* fs.read, so this test \
+                 fails for the intended reason"
+            );
+            assert!(
+                !has_fs_covered_observer(&coverage),
+                "{reason} on fs.read must not discharge the obligation"
+            );
+        }
+
+        let ok = observer_with_fs_read_partial(PartialReason::OverApproximates);
+        assert!(
+            has_fs_covered_observer(&ok),
+            "over-approximates is the one direction that discharges"
+        );
+    }
+
+    /// **The engine and the certificate must never disagree about the
+    /// same coverage.**
+    ///
+    /// This is the guard the previous divergence needed. The engine
+    /// sealing a status that `Certificate::check_coverage_deficit` then
+    /// refuses is not a cosmetic inconsistency — it is the engine
+    /// certifying something the certificate's own invariant check
+    /// rejects. Asserting agreement over the whole cross product means a
+    /// future edit to either spelling fails here rather than in
+    /// production.
+    #[test]
+    fn the_engine_and_the_certificate_agree_on_every_shape() {
+        let roles = [
+            ProducerRole::Observer,
+            ProducerRole::Adapter,
+            ProducerRole::Probe,
+        ];
+        let emit_sets: [&[&str]; 5] = [&[], &["fs.read"], &["fs.write"], &["fs.*"], &["tool.*"]];
+        let partials = [
+            None,
+            Some(PartialReason::OverApproximates),
+            Some(PartialReason::UnderApproximates),
+            Some(PartialReason::BlindInScope),
+        ];
+
+        for role in roles {
+            for emits in emit_sets {
+                for partial in partials {
+                    let mut e = entry("p", role, emits);
+                    if let Some(reason) = partial {
+                        e.partial.insert(
+                            "fs.read".to_string(),
+                            PartialCoverage::new(reason, "declared gap"),
+                        );
+                    }
+                    let engine_says = has_fs_covered_observer(std::slice::from_ref(&e));
+                    let core_says = e.discharges_subprocess_obligation();
+                    assert_eq!(
+                        engine_says, core_says,
+                        "engine and core disagree for role={role:?} emits={emits:?} \
+                         partial={partial:?}; ADR 0011 §Decision 3 requires ONE \
+                         implementation of this rule"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
