@@ -50,6 +50,7 @@
 
 pub mod compile;
 pub mod config;
+pub mod content;
 pub mod coverage;
 pub mod determinism;
 pub mod diagnostic;
