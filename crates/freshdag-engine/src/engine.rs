@@ -244,16 +244,46 @@ impl Engine {
             ));
 
             let key = conflict.dependency.to_string();
-            if let Some(edge) = edges.iter_mut().find(|e| e.dependency.key == key) {
-                edge.verdict = EdgeVerdict::Unknown;
-                edge.reason = Some((
-                    ReasonCode::DependencyChangedDuringComputation,
-                    Some(format!(
-                        "observed={} then={}",
-                        conflict.first_fingerprint, conflict.conflicting_fingerprint
-                    )),
-                ));
-            }
+            let Some(edge) = edges.iter_mut().find(|e| e.dependency.key == key) else {
+                // ADR 0009: an artifact with a mid-computation conflict
+                // can never be `valid`. If the conflict names an edge
+                // this evaluation does not have, that guarantee has no
+                // way to attach — and a silent miss here is a silent
+                // `valid`, because no reason is produced and `seal`'s
+                // self-audit has nothing to disagree with.
+                //
+                // Sound today: `classify_probe` builds the key as
+                // `id.0`, so it equals `Dependency::id().to_string()`.
+                // One normalization change away from not being, which
+                // is exactly why this refuses rather than shrugs.
+                return Err(EngineError::InternalInconsistency {
+                    message: format!(
+                        "store recorded a conflict on `{key}`, which is not among the \
+                         edges evaluated for this computation; the ADR 0009 guarantee \
+                         that a conflicted artifact cannot be valid has nothing to attach to"
+                    ),
+                });
+            };
+
+            edge.verdict = EdgeVerdict::Unknown;
+            // The store raises a conflict on a differing fingerprint OR
+            // a differing trust class. Only the first is "the input
+            // changed while the agent was reading it"; the second is the
+            // same bytes classified two ways, and rendering
+            // `observed=X then=X` at a user while telling them the
+            // contents differed would be false.
+            let detail = if conflict.first_fingerprint == conflict.conflicting_fingerprint {
+                format!(
+                    "same-fingerprint trust-class conflict on `{key}`; fingerprint={}",
+                    conflict.first_fingerprint
+                )
+            } else {
+                format!(
+                    "observed={} then={}",
+                    conflict.first_fingerprint, conflict.conflicting_fingerprint
+                )
+            };
+            edge.reason = Some((ReasonCode::DependencyChangedDuringComputation, Some(detail)));
         }
 
         // --- artifact-scoped coverage reasons -------------------------
@@ -1059,21 +1089,38 @@ fn volatile_within_ttl_verdict(dep: &Dependency, probed: Option<&ProbeResult>) -
             },
             reason: caps_reason(TrustClass::Volatile),
         },
-        // Nothing checked this edge: no probe registered for the scheme,
-        // arbitration tied, the probe was removed, or a probe ran and
-        // could not decide. The verdict is the same `LikelyValid`, but
-        // the evidence behind it is strictly weaker, and ADR 0009's
-        // whole point is that the certificate must say which of the two
-        // it is. Reporting `trust-class-volatile-caps-at-likely-valid`
-        // here tells a user reading `freshdag why` that a probe checked
-        // and agreed, when nothing checked it at all.
+        // A probe RAN and could not decide. Same verdict, and the same
+        // evidence value — none — but a different fact about the world,
+        // and `probe-unknown` is the code that already means exactly
+        // this: certificate-contract says it "asserts a probe
+        // executed", against `no-probe-available` which asserts one did
+        // not.
         //
-        // `ProbeResult::Unknown` lands here rather than on edge
-        // `Unknown`: a probe that ran and could not decide has supplied
-        // no evidence, and the validated TTL is what survives. Mapping
-        // it to `Unknown` would restore the scheme-dependence ADR 0009
-        // Amendment 2 removed.
-        None | Some(ProbeResult::Unknown { .. }) => EdgeOutcome {
+        // It lands on `Match` rather than edge `Unknown` because the
+        // validated TTL is what survives when a probe supplies nothing
+        // (ADR 0009 Amendment 2); mapping it to `Unknown` would restore
+        // the scheme-dependence that amendment removed. What it must
+        // NOT do is borrow `volatile-within-ttl-unprobed`, whose §Decision
+        // 2 emission condition is "no probe was consulted" and whose
+        // wire name says `unprobed`. An earlier revision did exactly
+        // that, and the CLI then told users "NOTHING CHECKED THIS
+        // DEPENDENCY. No probe is registered for its scheme" about an
+        // edge whose probe had just answered.
+        Some(ProbeResult::Unknown { .. }) => EdgeOutcome {
+            dependency: dep.clone(),
+            verdict: EdgeVerdict::Match {
+                recorded_trust_class: TrustClass::Volatile,
+                observed_trust_class: TrustClass::Volatile,
+                observed_fp: dep.fingerprint.clone(),
+            },
+            reason: Some((ReasonCode::ProbeUnknown, None)),
+        },
+        // Nothing was consulted at all: no probe registered for the
+        // scheme, arbitration tied, or the probe that recorded the
+        // fingerprint was removed. This is ADR 0009 §Decision 2's
+        // emission condition, verbatim, and the only evidence is the
+        // producer's declared TTL.
+        None => EdgeOutcome {
             dependency: dep.clone(),
             verdict: EdgeVerdict::Match {
                 recorded_trust_class: TrustClass::Volatile,

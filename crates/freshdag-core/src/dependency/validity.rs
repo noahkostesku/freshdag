@@ -184,8 +184,18 @@ pub enum ReasonCode {
     /// third-party rechecker reading the certificate.
     TrustClassVolatileCapsAtLikelyValid,
     /// Edge-scoped. A `Volatile` edge is inside a validated TTL and
-    /// **no probe ran**: none is registered for the scheme, arbitration
-    /// tied, or the probe that recorded the fingerprint was removed.
+    /// **no probe was consulted**: none is registered for the scheme,
+    /// arbitration tied, or the probe that recorded the fingerprint was
+    /// removed.
+    ///
+    /// A probe that *ran* and could not decide is
+    /// [`ReasonCode::ProbeUnknown`], not this. Both leave the TTL as the
+    /// only evidence and both are held at exit 2 by
+    /// `--accept-likely-valid`'s floor, but they are different facts
+    /// about the world and this code's name says `unprobed`. An earlier
+    /// revision folded them together, and the CLI then told users
+    /// "NOTHING CHECKED THIS DEPENDENCY" about an edge whose probe had
+    /// just answered.
     ///
     /// This is the only place in FreshDAG where "no probe ran" is not
     /// [`ReasonCode::NoProbeAvailable`] and not `Unknown`. The producer

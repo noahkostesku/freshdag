@@ -135,8 +135,8 @@
   },
   "notes": [
     "sibling of fixture 7 in docs/EVALUATION.md \u00a72, added by the ADR 0009 amendment",
-    "volatile-external-dep is the unprobed arm; this is the probed arm. Their expected blocks are deliberately identical -- that identity IS the assertion. Wave 2 shipped the volatile rule inside arbitration's Err(no_probe) arm, where these two would have disagreed: unprobed likely-valid, probed unknown, on the strength of probe registration alone.",
-    "after_mutation=unknown is reached the same way as in the unprobed arm: the harness advances its injected clock past ttl_seconds. The scripted probe still answers match, which must not rescue an elapsed TTL."
+    "after_mutation=unknown is reached the same way as in the unprobed arm: the harness advances its injected clock past ttl_seconds. The scripted probe still answers match, which must not rescue an elapsed TTL.",
+    "This is the PROBED arm; volatile-external-dep is the unprobed arm. Their `value` fields are deliberately identical and their `reason_codes` deliberately are NOT. The identical VALUE is the assertion \u2014 ADR 0009 Amendment 2's guarantee that registering a probe cannot by itself move a volatile edge's verdict, only positive drift evidence can. The differing REASON is W9.1's: same verdict, different evidence, and the certificate must say which. Before W9.1 both blocks were identical and the notes said that identity was the assertion; when the reason codes split, the pair silently stopped pinning the verdict guarantee it existed for. `the_probed_and_unprobed_volatile_arms_agree_on_the_verdict` in crates/freshdag-engine/src/tests.rs now pins it directly, because a note is not a test."
   ],
   "input_probes": {
     "web.search://q=acme pricing changes 2026": {

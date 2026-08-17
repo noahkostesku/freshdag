@@ -105,11 +105,13 @@ impl Exit {
     /// cannot go under.
     ///
     /// The flag means "I accept a result that was **checked** but only
-    /// heuristically". It does not mean "I accept a result that was
-    /// never checked at all", and a `likely-valid` resting on
-    /// [`ReasonCode::VolatileWithinTtlUnprobed`] is the second thing: no
-    /// probe ran, and the only evidence is that whoever recorded the
-    /// dependency declared a lifetime which has not yet elapsed.
+    /// heuristically". It does not mean "I accept a result no probe
+    /// backs", and two codes are that second thing:
+    /// [`ReasonCode::VolatileWithinTtlUnprobed`] (nothing was consulted)
+    /// and [`ReasonCode::ProbeUnknown`] (something was consulted and
+    /// returned nothing). Either way the only evidence is that whoever
+    /// recorded the dependency declared a lifetime which has not yet
+    /// elapsed.
     ///
     /// Letting the flag lift that to `0` would make a producer's own
     /// declaration a substitute for observation — invariant #7 with
@@ -128,10 +130,23 @@ impl Exit {
         reasons: &[ValidityReason],
         accept_likely_valid: bool,
     ) -> Self {
-        let unprobed = reasons
-            .iter()
-            .any(|r| matches!(r.reason, ReasonCode::VolatileWithinTtlUnprobed));
-        if accept_likely_valid && unprobed && matches!(status, ValidityStatus::LikelyValid) {
+        // Both codes mean "no probe evidence backs this edge". They
+        // differ in whether a probe was consulted, which is a fact worth
+        // telling a user and irrelevant to whether the flag applies: a
+        // probe that ran and could not decide contributed nothing, so
+        // the only thing holding the edge up is still the declared TTL.
+        //
+        // `probe-unknown` normally accompanies an `Unknown` artifact,
+        // where the flag never applied anyway. It reaches `LikelyValid`
+        // only on a volatile edge inside a validated TTL — precisely the
+        // case this floor is about.
+        let unverified = reasons.iter().any(|r| {
+            matches!(
+                r.reason,
+                ReasonCode::VolatileWithinTtlUnprobed | ReasonCode::ProbeUnknown
+            )
+        });
+        if accept_likely_valid && unverified && matches!(status, ValidityStatus::LikelyValid) {
             return Self::Unknown;
         }
         Self::for_status(status, accept_likely_valid)
@@ -201,6 +216,25 @@ mod tests {
         assert_eq!(
             Exit::for_status_with_reasons(ValidityStatus::LikelyValid, &unprobed, false),
             Exit::Unknown
+        );
+    }
+
+    /// A probe that ran and could not decide is no more "checked" than
+    /// no probe at all.
+    ///
+    /// `probe-unknown` reaches `LikelyValid` only on a volatile edge
+    /// inside a validated TTL — everywhere else an undecided probe makes
+    /// the edge `Unknown`, where the flag never applied. So the floor
+    /// must cover it: an operator accepting `likely-valid` is accepting
+    /// an edge nothing verified, whichever of the two ways it went
+    /// unverified.
+    #[test]
+    fn accept_likely_valid_does_not_lift_an_edge_whose_probe_could_not_decide() {
+        let undecided = [reason(ReasonCode::ProbeUnknown)];
+        assert_eq!(
+            Exit::for_status_with_reasons(ValidityStatus::LikelyValid, &undecided, true),
+            Exit::Unknown,
+            "a probe that supplied no evidence leaves only the declared TTL"
         );
     }
 
