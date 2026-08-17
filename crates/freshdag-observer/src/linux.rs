@@ -17,13 +17,14 @@
 //! cannot exist, while the actual rename target got no event at all.
 //! [`parse_fsatrace_lines`] now splits both fields.
 //!
-//! Because this backend has never been exercised against a recorded
-//! fsatrace trace (`fixtures/observer-conformance/` does not yet exist,
-//! though observer-contract §Testing defines conformance in terms of
-//! it), the parser accepts a single-path `m` as a write rather than
-//! assuming the two-path form is the only one. Standing that fixture set
-//! up is what would settle the wire format from evidence instead of from
-//! upstream documentation.
+//! The parser accepts a single-path `m` as a write rather than assuming
+//! the two-path form is the only one, because this backend has never
+//! been run against a trace recorded from a real fsatrace binary. The
+//! `fixtures/observer-conformance/` set now exists and pins the parse,
+//! but its traces are hand-written from upstream documentation — they
+//! settle what this parser *does*, not yet what fsatrace *emits*.
+//! Recording a trace from the real binary is what would close that,
+//! and is the one thing this fixture set cannot do for itself.
 //!
 //! For W6.1 we support the read and write kinds — the minimum needed
 //! for the Wave-1 fixtures. Full trace support (renames, negative
@@ -57,6 +58,7 @@ use serde_json::json;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::determinism::{Clock, IdGen, SystemClock, UuidV7Gen};
 use crate::observer::{CommandInvocation, ObservationRun, Observer, ObserverError};
 
 /// Observer that wraps a subprocess using the external `fsatrace`
@@ -321,6 +323,31 @@ pub fn parse_fsatrace_lines(
     session_id: &str,
     version: &str,
 ) -> Vec<freshdag_core::ir::IrEvent> {
+    parse_fsatrace_lines_with(
+        trace,
+        session_id,
+        version,
+        &SystemClock,
+        &mut UuidV7Gen::default(),
+    )
+}
+
+/// [`parse_fsatrace_lines`] with the clock and id source injected.
+///
+/// The parse itself is pure; the only ambient non-determinism in an
+/// emitted event is its `event_id` and `ts`. Injecting both is what
+/// lets `fixtures/observer-conformance/` hold byte-stable goldens, as
+/// observer-contract §Testing requires and `.claude/rules/testing.md`
+/// mandates. Production calls [`parse_fsatrace_lines`], which wires the
+/// real sources.
+#[must_use]
+pub fn parse_fsatrace_lines_with(
+    trace: &str,
+    session_id: &str,
+    version: &str,
+    clock: &dyn Clock,
+    ids: &mut dyn IdGen,
+) -> Vec<freshdag_core::ir::IrEvent> {
     let mut events = Vec::new();
     for line in trace.lines() {
         let Some((op, rest)) = line.split_once('|') else {
@@ -353,6 +380,8 @@ pub fn parse_fsatrace_lines(
                     "read_kind": "direct",
                     "impure": false
                 }),
+                clock,
+                ids,
             )),
             // A two-path `m` is a move, and this backend does not yet
             // emit the synthetic write at the rename target that
@@ -371,6 +400,8 @@ pub fn parse_fsatrace_lines(
                     "size": 0,
                     "mode": mode_for_op(op),
                 }),
+                clock,
+                ids,
             )),
             _ => {
                 // Deletes, queries, and any future op are not covered by
@@ -396,16 +427,18 @@ fn make_event(
     version: &str,
     kind: EventKind,
     payload: serde_json::Value,
+    clock: &dyn Clock,
+    ids: &mut dyn IdGen,
 ) -> freshdag_core::ir::IrEvent {
     freshdag_core::ir::IrEvent {
-        event_id: Uuid::new_v4(),
+        event_id: ids.next_id(),
         producer: "freshdag-observer-fsatrace".to_string(),
         producer_version: version.to_string(),
         session_id: session_id.to_string(),
         computation_id: None,
         parent_id: None,
         causal_inputs: None,
-        ts: OffsetDateTime::now_utc(),
+        ts: clock.now(),
         kind,
         payload,
     }

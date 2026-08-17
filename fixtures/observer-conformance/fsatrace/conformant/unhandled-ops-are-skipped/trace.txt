@@ -1,0 +1,4 @@
+r|/repo/a.md
+d|/repo/gone.md
+q|/repo/statted.md
+r|/repo/b.md

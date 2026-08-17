@@ -1,0 +1,2 @@
+r|/repo/ICP.md
+w|/repo/brief.md

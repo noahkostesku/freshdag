@@ -1,0 +1,1 @@
+{"event_id":"00000000-0000-0000-0000-000000000001","producer":"freshdag-observer-fsatrace","producer_version":"0.0.0-conformance","session_id":"conformance-session","ts":"2026-01-01T00:00:00Z","kind":"fs.read","payload":{"impure":false,"path":"/repo/link-to-secret","raw_path":"/repo/link-to-secret","read_kind":"direct","size":0}}
