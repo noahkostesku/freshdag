@@ -55,7 +55,6 @@ use freshdag_core::ir::{
     CoverageManifest, EventKind, EventKindPattern, PartialCoverage, PartialReason, ProducerRole,
 };
 use serde_json::json;
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::determinism::{Clock, IdGen, SystemClock, UuidV7Gen};
@@ -323,13 +322,7 @@ pub fn parse_fsatrace_lines(
     session_id: &str,
     version: &str,
 ) -> Vec<freshdag_core::ir::IrEvent> {
-    parse_fsatrace_lines_with(
-        trace,
-        session_id,
-        version,
-        &SystemClock,
-        &mut UuidV7Gen::default(),
-    )
+    parse_fsatrace_lines_with(trace, session_id, version, &SystemClock, &mut UuidV7Gen)
 }
 
 /// [`parse_fsatrace_lines`] with the clock and id source injected.
