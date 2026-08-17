@@ -25,12 +25,19 @@
       "observed_at": "2026-08-15T13:45:16.007Z"
     }
   ],
-  "comparator": { "name": "exact" },
+  "comparator": {
+    "name": "exact"
+  },
   "status": {
     "value": "valid",
     "checked": "2026-08-15T13:46:08.001Z"
   },
   "observation_coverage": [
-    { "producer": "freshdag-adapter-claude", "version": "0.1.0", "role": "adapter" }
+    {
+      "producer": "freshdag-adapter-claude",
+      "version": "0.1.0",
+      "role": "adapter",
+      "partial": {}
+    }
   ]
 }
