@@ -316,6 +316,21 @@ mod coverage_deficit {
         }
     }
 
+    /// An observer-role manifest, for pinning rules that turn on
+    /// fidelity rather than vantage point.
+    fn observer_manifest(emits: &[&str]) -> CoverageManifest {
+        CoverageManifest {
+            role: ProducerRole::Observer,
+            producer: "freshdag-observer-example".to_string(),
+            version: "0.1.0".to_string(),
+            platforms: vec![],
+            emits: emits.iter().map(|s| EventKindPattern::from(*s)).collect(),
+            partial: std::collections::BTreeMap::new(),
+            capabilities: std::collections::BTreeMap::new(),
+            known_limitations: vec![],
+        }
+    }
+
     /// A `Valid` certificate carrying the given coverage entries.
     ///
     /// `status.reasons` is empty because `Valid` is the only status
@@ -518,28 +533,83 @@ mod coverage_deficit {
         );
     }
 
-    /// Off-Linux, the fsatrace backend's own manifest must not
-    /// discharge the obligation either — `observe` cannot run there, so
-    /// a manifest still claiming `fs.*` would launder zero observation
-    /// into a `valid` certificate.
+    /// The fsatrace backend's own manifest does not discharge a `bash`
+    /// obligation on **any** platform, for two different reasons.
+    ///
+    /// Off Linux, `observe` cannot run at all, so the manifest declares
+    /// no coverage; a manifest still claiming `fs.*` there would launder
+    /// zero observation into a `valid` certificate.
+    ///
+    /// On Linux it declares `fs.read` coverage but flags it
+    /// `under-approximates` — mmap reads are not emitted, statically
+    /// linked processes are invisible — and ADR 0011 requires every
+    /// matching `partial` entry to be `over-approximates` before an
+    /// obligation is discharged.
+    ///
+    /// This assertion used to read `result.expect("on Linux fsatrace
+    /// really does cover fs.*")`. It inverted with the ADR 0011
+    /// migration, and that is **the expected finding, not a
+    /// regression** (ADR 0011, Amendment, Correction 3): an observer
+    /// that cannot see mmap reads or statically linked processes cannot
+    /// answer the question the coverage-deficit rule asks. The way to
+    /// make this test assert discharge again is to close the observer
+    /// gap — emit mmap reads, cover static binaries — not to relabel
+    /// the note. Under invariant #15 a spurious `unknown` is the price
+    /// we accept; a spurious `valid` is what invariant #7 forbids.
     #[test]
-    fn fsatrace_manifest_discharges_obligation_only_where_it_runs() {
+    fn fsatrace_manifest_does_not_discharge_a_bash_obligation() {
         let manifest =
             crate::linux::FsatraceObserver::with_binary("/nonexistent/fsatrace", "sess").coverage();
         let events = vec![tool_invoked("freshdag-observer-fsatrace", ToolKind::Bash)];
-        let result =
-            valid_cert(vec![CoverageEntry::from(&manifest)]).check_coverage_deficit(&events);
+        let entry = CoverageEntry::from(&manifest);
 
+        // Precondition, so a passing test cannot be an artefact of an
+        // empty manifest on whichever platform this runs on.
         if cfg!(target_os = "linux") {
-            result.expect("on Linux fsatrace really does cover fs.*");
-        } else {
-            assert_eq!(
-                result.unwrap_err(),
-                InvariantError::CoverageDeficit {
-                    tool_kind: "bash".to_string()
-                }
+            assert!(
+                entry.covers(EventKind::FsRead),
+                "on Linux the manifest must still *claim* fs.read; the \
+                 deficit has to come from its fidelity, not its absence"
             );
+            assert!(
+                !entry.discharges(EventKind::FsRead),
+                "under-approximating fs.read must not discharge"
+            );
+        } else {
+            assert!(!entry.covers(EventKind::FsRead));
         }
+
+        assert_eq!(
+            valid_cert(vec![entry])
+                .check_coverage_deficit(&events)
+                .unwrap_err(),
+            InvariantError::CoverageDeficit {
+                tool_kind: "bash".to_string()
+            }
+        );
+    }
+
+    /// The Linux arm of the test above cannot run on other platforms, so
+    /// pin the rule it depends on directly: a manifest shaped exactly
+    /// like the Linux fsatrace one — observer role, `fs.read` declared,
+    /// `under-approximates` — must not discharge.
+    #[test]
+    fn an_under_approximating_observer_does_not_discharge_anywhere() {
+        let mut manifest = observer_manifest(&["fs.read", "fs.write"]);
+        manifest.partial.insert(
+            "fs.read".to_string(),
+            freshdag_core::ir::PartialCoverage::new(
+                freshdag_core::ir::PartialReason::UnderApproximates,
+                "mmap reads are not emitted; statically linked processes are invisible",
+            ),
+        );
+        let entry = CoverageEntry::from(&manifest);
+
+        assert!(entry.covers(EventKind::FsRead), "it does claim the kind");
+        assert!(
+            !entry.discharges(EventKind::FsRead),
+            "but a missed-event admission must not discharge it"
+        );
     }
 
     // ---------------- REGRESSION: the gap this workstream found ------
@@ -568,11 +638,19 @@ mod coverage_deficit {
     /// protect.
     ///
     /// The fix is `ProducerRole`: only `role: Observer` discharges.
-    /// Note this is a *role* check and deliberately not a `partial`
-    /// check — the fsatrace observer legitimately carries `partial`
-    /// notes (rename-atomic writes, mmap reads), so a partial-based
-    /// rule would mean nothing could ever discharge the obligation.
-    /// `partial` is about fidelity; this is about vantage point.
+    /// This test pins the *role* half of the rule — vantage point —
+    /// which is what it was written for and what it still checks.
+    ///
+    /// It used to add that a `partial`-based rule "would mean nothing
+    /// could ever discharge the obligation", because the fsatrace
+    /// observer "legitimately carries `partial` notes". ADR 0011,
+    /// Amendment, Corrections 1-3 withdrew both halves of that: those
+    /// notes describe events that are *not emitted*, so they are
+    /// `under-approximates`, and ADR 0011 deliberately added the
+    /// fidelity check the sentence argued against. Role and fidelity
+    /// are now both required, and this observer currently satisfies
+    /// only the first — which is the expected post-migration state, not
+    /// a regression.
     #[test]
     fn adapter_fs_claim_does_not_discharge_bash_obligation() {
         let stub_manifest = StubObserver::new().coverage();
