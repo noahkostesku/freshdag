@@ -479,6 +479,84 @@ fn a_specific_partial_entry_cannot_override_a_broader_blindness() {
 }
 
 #[test]
+fn adding_a_partial_entry_can_only_ever_make_a_producer_discharge_less() {
+    // ADR 0011, Amendment, Correction 4 names monotonicity as "the
+    // property to preserve, and the one to test": a `partial` map is a
+    // conjunction of admissions, so a new entry may withdraw a
+    // discharge but must never grant one. The test above pins one
+    // instance of this; here it is pinned as the general property, over
+    // every (base manifest, added entry, kind) triple the closed
+    // vocabulary allows.
+    //
+    // A rule that resolved most-specific-wins fails this: adding a
+    // narrow `over-approximates` entry beneath a broad `blind-in-scope`
+    // one would turn a non-discharging manifest into a discharging one.
+    const KINDS: [EventKind; 6] = [
+        EventKind::FsRead,
+        EventKind::FsWrite,
+        EventKind::FsStat,
+        EventKind::ProcSpawn,
+        EventKind::NetConnect,
+        EventKind::ToolInvoked,
+    ];
+    const PATTERNS: [&str; 6] = ["fs.read", "fs.write", "fs.*", "proc.*", "net.connect", "*"];
+    const REASONS: [PartialReason; 3] = [
+        PartialReason::OverApproximates,
+        PartialReason::UnderApproximates,
+        PartialReason::BlindInScope,
+    ];
+
+    let bases: Vec<Vec<(&str, PartialCoverage)>> = vec![
+        vec![],
+        vec![(
+            "fs.read",
+            PartialCoverage::new(PartialReason::OverApproximates, "coarse"),
+        )],
+        vec![(
+            "fs.*",
+            PartialCoverage::new(PartialReason::BlindInScope, "blind in subprocesses"),
+        )],
+        vec![
+            (
+                "fs.*",
+                PartialCoverage::new(PartialReason::OverApproximates, "coarse"),
+            ),
+            (
+                "fs.write",
+                PartialCoverage::new(PartialReason::UnderApproximates, "lossy"),
+            ),
+        ],
+    ];
+
+    for base in &bases {
+        let before = observer_with_partial(base);
+        for pattern in PATTERNS {
+            // `partial` is keyed by pattern, so reusing an existing key
+            // is a replacement rather than an addition. Monotonicity is
+            // a claim about additions only.
+            if base.iter().any(|(k, _)| *k == pattern) {
+                continue;
+            }
+            for reason in REASONS {
+                let mut extended = base.clone();
+                extended.push((pattern, PartialCoverage::new(reason, "added")));
+                let after = observer_with_partial(&extended);
+
+                for kind in KINDS {
+                    assert!(
+                        !after.discharges(kind) || before.discharges(kind),
+                        "adding `{pattern}` => `{reason}` granted a discharge for `{}` \
+                         that the base manifest did not have; a `partial` entry must \
+                         only ever subtract (ADR 0011, Amendment, Correction 4)",
+                        kind.as_wire_str()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn wildcard_partial_applies_to_every_matching_kind() {
     let m = observer_with_partial(&[(
         "fs.*",
