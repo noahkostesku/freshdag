@@ -357,13 +357,8 @@ way to say so and the observer still cannot discharge. Whether a
 bounded/scoped under-approximation deserves a fourth member was a real
 question and was deliberately out of scope here.
 
-ADR 0012 rules it out on a two-horned argument: a bounded member that
-*discharges* is unsound, because a bounded mechanism does not bound the
-harm — the one dependency missed may be the only one that mattered — and
-a bounded member that does *not* discharge is inert, since
-`PartialReason::discharges` is the whole machine-readable content of the
-vocabulary. It also records why the honesty-is-punitive argument does
-not transfer from §Rejected alternatives: under the blunt rule a
-producer could regain discharge by deleting a true note, so the
-incentive was to lie; here no documentation change regains discharge,
-only closing the gap does.
+See ADR 0012 and its Amendment for the reasoning. It is deliberately
+*not* restated here: `docs/OWNERSHIP.md` makes a merged ADR immutable
+except by superseding, and a duplicated argument is a copy that can
+drift from the original — as this one had, since it reproduced a horn
+that ADR 0012's Amendment has now withdrawn.
