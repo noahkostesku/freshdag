@@ -133,6 +133,13 @@ fn prose(code: ReasonCode) -> &'static str {
             "This computation produced an artifact without a single observed\n\
              dependency. Absence of evidence is not evidence of freshness."
         }
+        ReasonCode::RecipeIdentityUnavailable => {
+            "This computation carries no recipe identity, so nothing can tie\n\
+             the artifact to a reproducible way of making it. Its dependencies\n\
+             may all have verified; what is missing is the identity of the\n\
+             computation they belong to. Some runtimes cannot supply one at\n\
+             all, in which case this caps every artifact they produce."
+        }
     }
 }
 

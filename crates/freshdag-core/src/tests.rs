@@ -438,11 +438,16 @@ const ALL_REASON_CODES: &[ReasonCode] = &[
     ReasonCode::NoDependenciesObserved,
     ReasonCode::VolatileWithinTtlUnprobed,
     ReasonCode::DependencyChangedDuringComputation,
+    ReasonCode::RecipeIdentityUnavailable,
 ];
 
 #[test]
 fn reason_code_wire_form_is_exact() {
     for (variant, wire) in [
+        (
+            ReasonCode::RecipeIdentityUnavailable,
+            "recipe-identity-unavailable",
+        ),
         (ReasonCode::Drift, "drift"),
         (ReasonCode::ProbeUnknown, "probe-unknown"),
         (ReasonCode::NoProbeAvailable, "no-probe-available"),
@@ -504,7 +509,7 @@ fn reason_code_serde_and_as_wire_str_agree() {
 fn reason_code_enumeration_is_complete() {
     // Guards against a variant added to the enum but not to
     // ALL_REASON_CODES (which would silently skip the sync check).
-    assert_eq!(ALL_REASON_CODES.len(), 12);
+    assert_eq!(ALL_REASON_CODES.len(), 13);
     let mut wires: Vec<&str> = ALL_REASON_CODES.iter().map(|c| c.as_wire_str()).collect();
     wires.sort_unstable();
     wires.dedup();
@@ -523,6 +528,7 @@ fn reason_code_scopes_are_as_documented() {
             ReasonCode::CoverageDeficit
                 | ReasonCode::ProducerMissingFromCoverage
                 | ReasonCode::NoDependenciesObserved
+                | ReasonCode::RecipeIdentityUnavailable
         );
         assert_eq!(
             code.is_artifact_scoped(),

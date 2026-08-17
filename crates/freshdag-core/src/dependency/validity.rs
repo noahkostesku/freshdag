@@ -243,6 +243,25 @@ pub enum ReasonCode {
     /// explicitly because no reason code existed and adding one is a
     /// contract change. This is that code.
     DependencyChangedDuringComputation,
+    /// Artifact-scoped. The computation carries no `recipe_hash`, so no
+    /// certificate about it may claim `Valid` or `LikelyValid`
+    /// (invariant #9, certificate-contract §Field Rules).
+    ///
+    /// Every dependency may have verified. What is missing is the
+    /// identity of the *computation* those dependencies belong to: an
+    /// artifact that cannot be tied to a reproducible recipe cannot be
+    /// shown to be the output of one.
+    ///
+    /// This exists because some runtimes cannot supply it at all. Claude
+    /// Code exposes no recipe, so `freshdag-adapter-claude` synthesizes
+    /// `recipe_id_or_hash` from the session and leaves `recipe_hash`
+    /// empty — permanently, not pending some fix. Before this code, the
+    /// engine met that case by refusing to seal a certificate, which
+    /// reported a *tool failure* for an artifact whose evidence was
+    /// merely incomplete. The adapter's own manifest had claimed all
+    /// along that invariant #9 "caps such computations below `valid`";
+    /// nothing implemented the cap. This is that cap.
+    RecipeIdentityUnavailable,
 }
 
 impl ReasonCode {
@@ -273,6 +292,7 @@ impl ReasonCode {
             Self::NoDependenciesObserved => "no-dependencies-observed",
             Self::VolatileWithinTtlUnprobed => "volatile-within-ttl-unprobed",
             Self::DependencyChangedDuringComputation => "dependency-changed-during-computation",
+            Self::RecipeIdentityUnavailable => "recipe-identity-unavailable",
         }
     }
 
@@ -288,7 +308,8 @@ impl ReasonCode {
         match self {
             Self::CoverageDeficit
             | Self::ProducerMissingFromCoverage
-            | Self::NoDependenciesObserved => true,
+            | Self::NoDependenciesObserved
+            | Self::RecipeIdentityUnavailable => true,
             Self::Drift
             | Self::ProbeUnknown
             | Self::NoProbeAvailable
