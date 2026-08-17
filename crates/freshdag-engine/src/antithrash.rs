@@ -8,10 +8,26 @@
 //!   observations at the same higher class do. Any intervening
 //!   observation at a different class resets the pending escalation.
 //! - **Demotion is explicit, never silent.** A strictly lower observed
-//!   class — or `ProbeResult::Unknown { retryable: false }` — emits a
-//!   `probe.trust_demoted` diagnostic and forces re-observation: the
-//!   edge's verdict this round is `Unknown`, so the demoted class never
-//!   quietly appears on a certificate.
+//!   class emits a `probe.trust_demoted` diagnostic and forces
+//!   re-observation: the edge's verdict this round is `Unknown`, so the
+//!   demoted class never quietly appears on a certificate.
+//!
+//! ## Demotion requires an observed trust class (ADR 0010)
+//!
+//! An observation at a strictly lower class is the *only* demotion
+//! trigger. `ProbeResult::Unknown` carries no trust-class information by
+//! construction and MUST NOT demote, at any value of `retryable`.
+//!
+//! The contract used to name `Unknown { retryable: false }` as a second
+//! trigger, and this module used to implement it. It was a category
+//! error: `retryable` answers a *scheduling* question ("should the
+//! daemon try again?") and demotion answers an *evidentiary* one ("did
+//! the source's validator get weaker?"), and the two are independent. A
+//! deleted file is unretryable and carries no trust information; an
+//! endpoint that stopped serving `ETag` is retryable and carries a lot.
+//! The one case where demotion is the right conclusion already arrives
+//! through [`TrustLedger::observe`], which folds a probe's
+//! `observed_trust_class`.
 //!
 //! The state is in memory and lives for the lifetime of one
 //! [`Engine`](crate::Engine). Persisting it across processes is a
@@ -72,9 +88,12 @@ pub enum TrustTransition {
         /// Newly adopted class.
         to: TrustClass,
     },
-    /// A strictly lower class (or an unretryable probe failure) was
-    /// observed. The engine emits `probe.trust_demoted` and the edge is
-    /// `Unknown` this round.
+    /// A strictly lower class was **observed**. The engine emits
+    /// `probe.trust_demoted` and the edge is `Unknown` this round.
+    ///
+    /// Only [`TrustLedger::observe`] produces this. Per ADR 0010 a probe
+    /// failure never does, however unretryable: `Unknown` carries no
+    /// trust-class information to demote on.
     Demoted {
         /// Previous class.
         from: TrustClass,
@@ -201,34 +220,6 @@ impl TrustLedger {
                 observations: count,
                 adopted,
             }
-        }
-    }
-
-    /// Record an unretryable probe failure.
-    ///
-    /// probe-contract §Anti-thrash Protocol: `Unknown { retryable:
-    /// false }` is a demotion trigger — the signal backing the recorded
-    /// class disappeared. Returns the transition so the caller emits the
-    /// `probe.trust_demoted` diagnostic.
-    pub fn note_unretryable_failure(
-        &mut self,
-        dependency_key: &str,
-        identity: &ProbeIdentity,
-        recorded: TrustClass,
-    ) -> TrustTransition {
-        self.note_probe(dependency_key, identity);
-        let entry = self
-            .entries
-            .entry((dependency_key.to_string(), identity.clone()))
-            .or_insert(Entry {
-                last_adopted_trust_class: recorded,
-                pending_escalation: None,
-            });
-        entry.pending_escalation = None;
-        let from = entry.last_adopted_trust_class;
-        TrustTransition::Demoted {
-            from,
-            to: TrustClass::Volatile,
         }
     }
 }
@@ -390,17 +381,30 @@ mod tests {
         );
     }
 
+    /// ADR 0010: the ledger has exactly one demotion trigger, and it is
+    /// an observation. `Unknown` never reaches this module, so a probe
+    /// failure — retryable or not — leaves the adopted class alone.
+    ///
+    /// The deleted `note_unretryable_failure` also announced a demotion
+    /// it never performed: it returned `Demoted { to: Volatile }`
+    /// without writing that class into the entry, so the "forces
+    /// re-observation" half of the contract clause never happened, and
+    /// it reported a transition even when `from` was already `Volatile`.
     #[test]
-    fn unretryable_failure_is_a_demotion_trigger() {
+    fn a_probe_failure_leaves_the_adopted_class_alone() {
         let mut ledger = TrustLedger::new();
-        let t = ledger.note_unretryable_failure("file:///x", &id(), TrustClass::Exact);
-        assert!(matches!(
-            t,
-            TrustTransition::Demoted {
-                from: TrustClass::Exact,
-                ..
-            }
-        ));
+        let key = "file:///x";
+        ledger.observe(key, &id(), TrustClass::Exact, TrustClass::Exact, at(0));
+        assert_eq!(ledger.adopted(key, &id()), Some(TrustClass::Exact));
+
+        // The engine's Unknown arm records only that this probe
+        // answered. Nothing about the trust class moves.
+        ledger.note_probe(key, &id());
+        assert_eq!(
+            ledger.adopted(key, &id()),
+            Some(TrustClass::Exact),
+            "a probe failure carries no trust-class information to demote on"
+        );
     }
 
     #[test]

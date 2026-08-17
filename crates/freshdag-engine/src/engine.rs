@@ -577,6 +577,26 @@ impl Engine {
                 }
             }
             ProbeResult::Unknown { reason, retryable } => {
+                // ADR 0010: `Unknown` maps to `ProbeUnknown` regardless
+                // of `retryable`, and never demotes.
+                //
+                // `retryable` answers a scheduling question; demotion
+                // answers an evidentiary one. Treating the first as the
+                // second told a user who deleted a dependency that the
+                // reason was `probe-trust-demoted` — a true detail under
+                // a false code, since the trust class of nothing was
+                // demoted and a file is gone. `FileProbe` returns
+                // `Unknown { retryable: false }` for a missing file, a
+                // malformed recorded fingerprint, and a fingerprint kind
+                // it cannot verify; none of those observed a weaker
+                // validator. The one case that does — an endpoint that
+                // stopped serving `ETag` — arrives as `Match`/`Drift`
+                // with a lower `observed_trust_class` and is folded by
+                // `TrustLedger::observe`.
+                //
+                // `retryable` still reaches the log below, where the
+                // scheduler wants it. Certificates explain; the log
+                // schedules.
                 emitted.push(self.probe_checked(
                     computation,
                     now,
@@ -588,26 +608,16 @@ impl Engine {
                     dep.trust_class,
                     Some(retryable),
                 ));
-                if retryable {
-                    return unknown(ReasonCode::ProbeUnknown, sanitize_detail(&reason));
-                }
-                // probe-contract §Anti-thrash Protocol: an unretryable
-                // Unknown means the signal backing the recorded class is
-                // gone. Demotion is explicit, never silent.
-                let transition =
-                    ledger.note_unretryable_failure(&dep.key, &selected.identity, dep.trust_class);
-                if let TrustTransition::Demoted { from, to } = transition {
-                    emitted.push(self.trust_demoted(
-                        computation,
-                        now,
-                        sequence,
-                        dep,
-                        &selected.identity,
-                        from,
-                        to,
-                    ));
-                }
-                unknown(ReasonCode::ProbeTrustDemoted, sanitize_detail(&reason))
+                // This probe answered for this key, whatever it said, so
+                // it owns the key for probe-removal purposes. Recording
+                // it on one arm and not the other was an artifact of
+                // routing `retryable` through the ledger; the safe and
+                // symmetric reading is that a probe that ran is the
+                // probe responsible (probe-contract §Anti-thrash,
+                // "Probe removal" — never fall through to another
+                // probe).
+                ledger.note_probe(&dep.key, &selected.identity);
+                unknown(ReasonCode::ProbeUnknown, sanitize_detail(&reason))
             }
         }
     }

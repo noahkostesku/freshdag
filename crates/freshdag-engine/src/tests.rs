@@ -248,24 +248,89 @@ fn probe_checked_omits_retryable_unless_the_result_is_unknown() {
     );
 }
 
-/// probe-contract §Anti-thrash: `Unknown { retryable: false }` means the
-/// signal backing the recorded trust class is gone. Demotion is explicit
-/// — a `probe.trust_demoted` diagnostic — and never silent.
+/// ADR 0010: `Unknown` maps to `probe-unknown` at every value of
+/// `retryable`, and never demotes.
+///
+/// The verdict is identical for both — it always was — so the whole
+/// content of this test is the *reason*, which is what invariant #6
+/// governs. `retryable` still reaches the log, where the scheduler wants
+/// it, and still stays off the certificate.
 #[test]
-fn an_unretryable_probe_failure_demotes_explicitly() {
-    let fixture = Fixture::new("demotion").with_probe_edge(
+fn an_unknown_is_probe_unknown_at_either_value_of_retryable() {
+    for retryable in [true, false] {
+        let fixture = Fixture::new("unknown-reason").with_probe_edge(
+            "https",
+            "acme.com/pricing",
+            "etag:\"abc\"",
+            TrustClass::Versioned,
+            None,
+        );
+        let mut registry = ProbeRegistry::new();
+        registry
+            .register(Arc::new(ScriptedProbe::new("https").with_fallback(
+                ProbeResult::Unknown {
+                    reason: "could not read /x: No such file or directory".to_string(),
+                    retryable,
+                },
+            )))
+            .expect("register");
+        let outcome = fixture.engine(registry).check_ok();
+
+        assert_eq!(
+            outcome.certificate.status.value,
+            ValidityStatus::Unknown,
+            "the verdict is unchanged by ADR 0010, at retryable={retryable}"
+        );
+        assert_eq!(
+            outcome.certificate.status.reasons[0].reason,
+            ReasonCode::ProbeUnknown,
+            "a probe ran and could not decide; nothing's trust class was demoted"
+        );
+        assert_eq!(
+            outcome.certificate.status.reasons[0].detail.as_deref(),
+            Some("could not read /x: No such file or directory"),
+            "the probe's reason string is the non-normative detail, never the code"
+        );
+        assert!(
+            !outcome
+                .events
+                .iter()
+                .any(|e| e.payload.get("message") == Some(&"probe.trust_demoted".into())),
+            "an Unknown carries no trust-class information, so there is \
+             nothing to demote and no demotion to announce"
+        );
+        let checked = outcome
+            .events
+            .iter()
+            .find(|e| e.kind == EventKind::ProbeChecked)
+            .expect("probe.checked emitted");
+        assert_eq!(checked.payload["retryable"], retryable);
+        assert_eq!(
+            checked.payload["trust_class"], "versioned",
+            "the recorded class is untouched"
+        );
+    }
+}
+
+/// The contrast that keeps ADR 0010 honest: `probe-trust-demoted` still
+/// exists, and still fires — for the one thing it names. A probe that
+/// *observes* a strictly lower class demotes.
+#[test]
+fn an_observation_at_a_lower_class_still_demotes_explicitly() {
+    let fp = format!("blake3:{}", blake3_of("notes"));
+    let fixture = Fixture::new("real-demotion").with_probe_edge(
         "https",
         "acme.com/pricing",
-        "etag:\"abc\"",
+        &fp,
         TrustClass::Versioned,
         None,
     );
     let mut registry = ProbeRegistry::new();
     registry
         .register(Arc::new(ScriptedProbe::new("https").with_fallback(
-            ProbeResult::Unknown {
-                reason: "malformed-etag".to_string(),
-                retryable: false,
+            ProbeResult::Match {
+                observed_fp: fp.parse().expect("fingerprint"),
+                observed_trust_class: TrustClass::Heuristic,
             },
         )))
         .expect("register");
@@ -279,10 +344,10 @@ fn an_unretryable_probe_failure_demotes_explicitly() {
     let diagnostic = outcome
         .events
         .iter()
-        .find(|e| e.kind == EventKind::Diagnostic)
+        .find(|e| e.payload.get("message") == Some(&"probe.trust_demoted".into()))
         .expect("diagnostic emitted");
-    assert_eq!(diagnostic.payload["message"], "probe.trust_demoted");
     assert_eq!(diagnostic.payload["from_trust_class"], "versioned");
+    assert_eq!(diagnostic.payload["to_trust_class"], "heuristic");
 }
 
 /// ARCHITECTURE §7: a `volatile` edge outside its TTL is `Unknown`.
