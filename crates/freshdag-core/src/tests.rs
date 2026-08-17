@@ -648,6 +648,79 @@ fn schema_partial_reason_enum_matches_rust() {
     );
 }
 
+/// A `CoverageEntry` that omits `partial` must FAIL TO DECODE.
+///
+/// This is the fail-open hole an `architect` review found in the ADR
+/// 0011 migration. `partial` carried `#[serde(default)]`, so an absent
+/// map decoded as "this producer declared no blindness" — the
+/// permissive answer. A certificate with `role: observer`, `fs.read` in
+/// `emits`, and no `partial` therefore discharged the `bash`/`task`
+/// obligation and re-checked `valid`: precisely the defect ADR 0011
+/// exists to close, surviving on the third-party-recheck surface
+/// `docs/NOVELTY.md §2` rests the wedge on.
+///
+/// Loud failure is the point. A tool whose job is to say "I cannot
+/// prove this" must not answer `valid` about a document it could not
+/// fully read.
+#[test]
+fn a_coverage_entry_without_partial_does_not_decode() {
+    let no_partial = serde_json::json!({
+        "producer": "freshdag-observer-example",
+        "version": "0.1.0",
+        "role": "observer",
+        "emits": ["fs.read", "fs.write"]
+    });
+    let err = serde_json::from_value::<CoverageEntry>(no_partial.clone())
+        .expect_err("an entry with no `partial` must not decode");
+    assert!(
+        err.to_string().contains("partial"),
+        "the error must name the missing field: {err}"
+    );
+
+    // The same entry decodes once it says so out loud, and an empty map
+    // remains the way to declare no partiality.
+    let mut declared = no_partial;
+    declared["partial"] = serde_json::json!({});
+    let entry: CoverageEntry =
+        serde_json::from_value(declared).expect("an explicit empty map decodes");
+    assert!(
+        entry.discharges_subprocess_obligation(),
+        "an observer that explicitly declares no gaps still discharges"
+    );
+}
+
+/// The permissive decode, demonstrated end to end on a certificate.
+///
+/// Guards the property rather than the field: whatever `partial`'s
+/// representation becomes, a document that never mentions a producer's
+/// blindness must not yield a reusable verdict.
+#[test]
+fn a_certificate_hiding_its_producers_blindness_is_unreadable() {
+    let raw = std::fs::read_to_string(
+        repo_root()
+            .join("fixtures/certificate-conformance/positive/exact-dep-valid/certificate.json"),
+    )
+    .expect("fixture readable");
+    let mut value: serde_json::Value = serde_json::from_str(&raw).expect("fixture parses");
+
+    // Strip every `partial` — the shape a pre-ADR-0011 document has.
+    for entry in value["observation_coverage"]
+        .as_array_mut()
+        .expect("coverage array")
+    {
+        entry
+            .as_object_mut()
+            .expect("entry object")
+            .remove("partial");
+    }
+
+    assert!(
+        serde_json::from_value::<Certificate>(value).is_err(),
+        "a certificate whose producers never declare their blindness must \
+         fail to decode rather than re-check as though they were faithful"
+    );
+}
+
 #[test]
 fn certificate_schema_accepts_the_legacy_bare_string_partial() {
     // The migration shape must stay expressible in the schema, or old

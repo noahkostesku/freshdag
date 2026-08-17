@@ -137,14 +137,31 @@ pub struct CoverageEntry {
     /// someone else can re-check without our store; a certificate that
     /// hides the producer's own admission of blindness is not one.
     ///
-    /// Absent means "this producer declared no partial coverage" — the
-    /// same thing an empty map means. Note this is NOT the fail-safe
-    /// direction, and it cannot be: there is no third state to decode
-    /// into. Certificates written before ADR 0011 therefore re-check as
-    /// though their producers were fully faithful. That is a bounded,
-    /// one-time exposure on pre-existing documents, not a live path —
-    /// every producer writing a certificate today emits this field.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// **REQUIRED — no `#[serde(default)]`, for exactly the reason
+    /// [`CoverageEntry::role`] has none.**
+    ///
+    /// An earlier revision defaulted this to an empty map and argued
+    /// that absent and empty must mean the same thing because "there is
+    /// no third state to decode into". Both halves were wrong. There is
+    /// a third state — the field's absence — and defaulting it decoded
+    /// that state as *"this producer declared no blindness"*, which is
+    /// the permissive answer.
+    ///
+    /// The hole that opened: a certificate omitting `partial`, with
+    /// `role: observer` and `fs.read` in `emits`, discharged the
+    /// `bash`/`task` obligation and re-checked `valid`. That is the
+    /// precise defect ADR 0011 exists to close, surviving on the one
+    /// surface where it matters most — `docs/NOVELTY.md §2` rests the
+    /// wedge on a third party re-checking this document without our
+    /// store, and a decode that fails open is a decode that lies to
+    /// exactly that reader.
+    ///
+    /// Requiring the field makes an ambiguous document fail **loudly**:
+    /// deserialization errors, the engine refuses, and nobody gets a
+    /// verdict. A tool whose job is to say "I cannot prove this" must
+    /// not answer "valid" to a document it could not fully read. An
+    /// empty map is still the way to say "no declared partiality" —
+    /// but you have to say it.
     pub partial: BTreeMap<String, PartialCoverage>,
     /// Human-readable known limitations that surface to end users.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
