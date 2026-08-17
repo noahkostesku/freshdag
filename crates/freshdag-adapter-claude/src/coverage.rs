@@ -141,9 +141,11 @@ fn partial_notes() -> BTreeMap<String, PartialCoverage> {
             PartialReason::UnderApproximates,
             "synthesized ONLY from the `Read` tool's `file_path` input on PreToolUse. \
              Pre-execution intent, not a confirmed effect: a denied or failed Read still \
-             produces this event. `size` is a placeholder (`size_observed: false`) and `hash` \
-             is absent because the compile path never touches the filesystem. Reads performed \
-             by any other means are invisible here.",
+             produces this event. `size`/`hash` are taken by reading the file at hook time, \
+             so they describe it as it stood just BEFORE the tool ran, not what the tool \
+             received; both are absent (`size_observed: false`) when the file is missing, \
+             unreadable, or above the adapter's inline-hash byte cap. Reads performed by any \
+             other means are invisible here.",
         ),
     );
     // "synthesized ONLY from Write/Edit/MultiEdit/NotebookEdit inputs" —

@@ -74,6 +74,19 @@ pub enum CheckError {
     },
     /// The certificate could not be serialized for `--json`.
     Json(serde_json::Error),
+    /// The computation carries no recipe identity, so no certificate
+    /// may claim `valid` or `likely-valid` (invariant #9, certificate
+    /// contract §Field Rules).
+    ///
+    /// This is a **verdict**, not a tool failure, which is why it is
+    /// lifted out of [`CheckError::Engine`]. Every dependency may have
+    /// verified; what is missing is the identity of the computation
+    /// they belong to, and an artifact that cannot be tied to its
+    /// producer is not provably valid. Exit 2 says exactly that.
+    NoRecipeIdentity {
+        /// The engine's own account of the refusal.
+        detail: String,
+    },
 }
 
 impl CheckError {
@@ -84,6 +97,8 @@ impl CheckError {
             Self::NoStore { .. } | Self::Store(_) | Self::Json(_) => Exit::StoreError,
             Self::Engine(_) => Exit::EngineRefused,
             Self::NoSuchArtifact { .. } | Self::AmbiguousArtifact { .. } => Exit::Usage,
+            // Not `> 2`: this one *is* a statement about the artifact.
+            Self::NoRecipeIdentity { .. } => Exit::Unknown,
         }
     }
 }
@@ -98,6 +113,14 @@ impl std::fmt::Display for CheckError {
             ),
             Self::Store(e) => write!(f, "store error: {e}"),
             Self::Json(e) => write!(f, "the certificate could not be serialized: {e}"),
+            Self::NoRecipeIdentity { detail } => write!(
+                f,
+                "unknown — this computation has no recipe identity, so no certificate \
+                 may claim it valid ({detail}).\n\
+                 Every dependency may have verified; what is missing is the identity \
+                 of the computation that produced the artifact (invariant #9). \
+                 Unknown is not fresh: do not reuse it on the strength of this check."
+            ),
             Self::Engine(e) => write!(
                 f,
                 "the engine refused to emit a certificate: {e}\n\
@@ -178,7 +201,19 @@ pub fn run(store_root: &Path, artifact: &str) -> Result<Checked, CheckError> {
         .probes(registry)
         .build();
 
-    let outcome = engine.check(&artifact_id).map_err(CheckError::Engine)?;
+    let outcome = engine.check(&artifact_id).map_err(|err| match err {
+        // The engine refuses to seal a `valid`/`likely-valid`
+        // certificate without a recipe hash. For an adapter that cannot
+        // supply one — Claude Code exposes no recipe — that refusal is
+        // not a defect, it is the honest ceiling, and reporting it as a
+        // tool error (exit 3, "ignore this result") would be a worse
+        // signal to a CI job than reporting it as unknown (exit 2, "do
+        // not reuse").
+        EngineError::MissingRecipeHash { .. } => CheckError::NoRecipeIdentity {
+            detail: err.to_string(),
+        },
+        other => CheckError::Engine(other),
+    })?;
 
     Ok(Checked {
         certificate: outcome.certificate,
