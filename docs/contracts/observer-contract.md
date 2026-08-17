@@ -21,11 +21,21 @@ output.
 
 ## Coverage Manifest (mandatory)
 
+> **Every example payload in this document is illustrative, never
+> descriptive** (ADR 0011, Amendment, Ruling 5). It shows the *shape* a
+> conformant observer must satisfy and is **not a factual claim about
+> anything in `crates/`**. No ADR, engine branch, test, or review may
+> cite it as evidence of what a shipped producer declares — cite the
+> source file. Where a shipped observer and an example here diverge,
+> that is a conformance gap in the observer, not a contradiction in this
+> contract. Example producers are named `*-example` so they cannot be
+> mistaken for one.
+
 Every observer publishes:
 
 ```json
 {
-  "producer": "freshdag-observer-fsatrace",
+  "producer": "freshdag-observer-example",
   "version": "0.1.0",
   "role": "observer",
   "platforms": ["linux-x86_64", "linux-arm64"],
@@ -34,8 +44,14 @@ Every observer publishes:
     "proc.spawn", "proc.exit"
   ],
   "partial": {
-    "fs.write": "rename-atomic writes are correlated at close; see §Required Behavior 3",
-    "fs.read":  "mmap reads are pessimistic: hashed at mmap time"
+    "fs.write": {
+      "reason": "over-approximates",
+      "note": "rename-atomic writes are correlated at close; see §Required Behavior 3"
+    },
+    "fs.read": {
+      "reason": "over-approximates",
+      "note": "mmap reads are pessimistic: hashed at mmap time"
+    }
   },
   "capabilities": {
     "symlink_resolution": "at-observation-time",
@@ -47,6 +63,24 @@ Every observer publishes:
   ]
 }
 ```
+
+**What this example is demonstrating, and what it is not.** It shows an
+observer that has *met* §Correctness Pitfalls #2 and §Required Behavior
+#3 — hence `over-approximates` on both kinds, the one reason that
+discharges an observation obligation. **No observer shipped in this
+repository currently qualifies.** `crates/freshdag-observer/src/linux.rs`
+declares `fs.read` as `blind-in-scope` and `fs.write` as
+`under-approximates`, and the gaps behind those are goldened in
+`fixtures/observer-conformance/fsatrace/known-gap/`. Read this block as
+a target, never as a status report.
+
+`partial` values are `{reason, note}` objects drawn from the closed
+vocabulary in `docs/contracts/certificate-contract.md §Partial Coverage`
+(`over-approximates` | `under-approximates` | `blind-in-scope`). A bare
+string is the pre-ADR-0011 shape; it still deserializes and decodes as
+`under-approximates`, the conservative answer, but new manifests MUST
+use the object form. Where several `partial` patterns match one kind,
+**every** match must discharge before the obligation is discharged.
 
 Consumers use this manifest to know what "no event" means (invariant
 #7: absence of an event from a producer that does not cover it does
@@ -141,3 +175,17 @@ An observer is considered contract-conformant when:
 - The coverage manifest passes machine validation against actual output.
 - Adversarial fixtures (rename dance, mmap read, symlink swap) produce
   the correct synthesized IR events.
+
+The set lives at `fixtures/observer-conformance/<backend>/`, split into
+`conformant/` and `known-gap/`. A `known-gap/` case is goldened to what
+the backend emits **today** and carries a `gap.md` naming the clause it
+fails, so a non-conformance is executable rather than prose: a passing
+case means "still broken, still known", and a **failing** one means
+someone implemented the clause and the case should be promoted to
+`conformant/`.
+
+All three adversarial fixtures above currently sit in `known-gap/` for
+the fsatrace backend. **No observer in this repository is
+contract-conformant today**, and the fixture set says so out loud rather
+than being tuned until it passes. The second bullet — machine-validating
+the manifest against actual output — is not yet implemented at all.
