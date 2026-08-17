@@ -683,14 +683,22 @@ mod coverage_deficit {
     ///
     /// It used to add that a `partial`-based rule "would mean nothing
     /// could ever discharge the obligation", because the fsatrace
-    /// observer "legitimately carries `partial` notes". ADR 0011,
-    /// Amendment, Corrections 1-3 withdrew both halves of that: those
-    /// notes describe events that are *not emitted*, so they are
-    /// `under-approximates`, and ADR 0011 deliberately added the
-    /// fidelity check the sentence argued against. Role and fidelity
-    /// are now both required, and this observer currently satisfies
-    /// only the first — which is the expected post-migration state, not
-    /// a regression.
+    /// observer "legitimately carries `partial` notes". Both halves are
+    /// gone: ADR 0011 added precisely the fidelity check that sentence
+    /// argued against, and `observer-engineer` — reviewing this
+    /// backend's source, which is the only body with standing to
+    /// classify it — found its `fs.read` coverage `blind-in-scope`.
+    ///
+    /// The attribution matters and an earlier revision of this comment
+    /// got it wrong. ADR 0011's Amendment **withdrew** a classification
+    /// and forbade citing the ADR as authority for one (Correction 1);
+    /// citing it here re-created the exact substitution the Amendment
+    /// exists to end. The classification is the owner's, recorded in
+    /// `linux.rs::coverage`.
+    ///
+    /// Role and fidelity are both required now, and this observer
+    /// satisfies only the first — the expected post-migration state,
+    /// not a regression.
     #[test]
     fn adapter_fs_claim_does_not_discharge_bash_obligation() {
         let stub_manifest = StubObserver::new().coverage();

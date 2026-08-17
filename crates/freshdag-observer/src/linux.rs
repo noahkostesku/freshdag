@@ -182,18 +182,49 @@ impl Observer for FsatraceObserver {
         //
         // Consequence, and it is the expected one rather than a
         // regression (ADR 0011, Amendment, Correction 3): this observer
-        // no longer discharges a `bash`/`task` observation obligation,
-        // so `bash`-invoking computations on Linux report non-`valid`.
-        // It cannot see mmap reads or statically linked processes, so it
-        // cannot answer the question the rule asks. Closing the gap —
-        // not relabelling it — is what restores discharge.
+        // does not discharge a `bash`/`task` observation obligation, so
+        // `bash`-invoking computations on Linux report non-`valid`.
+        //
+        // `fs.read` is `blind-in-scope`, not `under-approximates`, and
+        // the distinction is the difference between a gap someone can
+        // close and one nobody can. `LD_PRELOAD` is not a leaky
+        // interception layer — it is absent by construction for a whole
+        // class of children: the loader drops it for setuid/setgid
+        // binaries, a sanitized-environment spawn (`env -i`) discards
+        // it, `syscall(SYS_openat, …)` never reaches libc, and a
+        // statically linked binary has no libc to preload into. A single
+        // `sudo` escapes this observer entirely, and no amount of work
+        // inside this backend changes that. Closing it means the
+        // `strace` / eBPF-LSM tier in observer-contract §Platform
+        // Matrix — a different backend, not a better version of this
+        // one.
+        //
+        // The mmap clause is deliberately demoted to second place and
+        // stated more carefully than it once was. fsatrace hooks the
+        // `open`/`openat`/`fopen` family, and every mmap is preceded by
+        // an open, so an mmapped file inside a preload-reachable process
+        // DOES produce `r|path` and is not a missed dependency at path
+        // granularity. What is missing is §Required Behavior #4's
+        // `read_kind: "mmap-pessimistic"` and hash-at-mmap-time; this
+        // backend hardcodes `read_kind: "direct"` with no hash. That is
+        // a fidelity gap — the over-approximating direction — and it
+        // must not be the clause a future reader "closes" and then flips
+        // this entry to `over-approximates` while `sudo`-invoked and
+        // statically linked subprocesses remain wholly unseen.
         partial.insert(
             "fs.read".to_string(),
             PartialCoverage::new(
-                PartialReason::UnderApproximates,
-                "mmap reads bypass LD_PRELOAD interception and are not emitted \
-                 (observer-contract §Correctness Pitfalls #2); statically linked or \
-                 raw-syscall processes are invisible",
+                PartialReason::BlindInScope,
+                "LD_PRELOAD interception is ABSENT BY CONSTRUCTION for whole classes of \
+                 child process: setuid/setgid binaries (the loader drops it), sanitized \
+                 environments, raw `syscall()` callers, and statically linked binaries. \
+                 Those processes are wholly unobserved, not partially observed, and no \
+                 change to this backend reaches them — closing this requires the \
+                 strace/eBPF-LSM tier in observer-contract §Platform Matrix. Separately \
+                 and less severely, reads are reported without §Required Behavior #4's \
+                 `read_kind: \"mmap-pessimistic\"` or a content hash: `read_kind` is \
+                 hardcoded `direct` and `size` is 0, so an emitted read is coarser than \
+                 reality even where interception does reach.",
             ),
         );
         partial.insert(
