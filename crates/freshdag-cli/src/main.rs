@@ -7,6 +7,7 @@
 //! prevent.
 
 mod check;
+mod coverage;
 mod exit;
 mod mark;
 mod render;
@@ -42,6 +43,8 @@ enum Command {
     Check(CheckArgs),
     /// Declare that a file the store recorded writing is an artifact.
     Mark(MarkArgs),
+    /// Report how much of a session FreshDAG actually observed.
+    Coverage(CoverageArgs),
     /// Explain why an artifact is stale.
     Why {
         /// Artifact id or path.
@@ -56,6 +59,17 @@ enum Command {
     Graph,
     /// Watch for dependency changes.
     Watch,
+}
+
+#[derive(Debug, Args)]
+struct CoverageArgs {
+    /// Store root holding the canonical observation log.
+    #[arg(long, default_value = DEFAULT_STORE, value_name = "DIR")]
+    store: PathBuf,
+
+    /// Emit the report as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -122,6 +136,7 @@ fn run() -> i32 {
     let exit = match cli.command {
         Some(Command::Check(args)) => check_command(&args),
         Some(Command::Mark(args)) => mark_command(&args),
+        Some(Command::Coverage(args)) => coverage_command(&args),
         Some(Command::Why { artifact }) => unimplemented_command("why", Some(&artifact)),
         Some(Command::Cert { artifact }) => unimplemented_command("cert", Some(&artifact)),
         Some(Command::Graph) => unimplemented_command("graph", None),
@@ -181,6 +196,32 @@ fn mark_command(args: &MarkArgs) -> Exit {
             err.exit()
         }
     }
+}
+
+/// `coverage` is a report, not a verdict: it exits 0 whatever it finds.
+/// A low number is a fact about the world, not a tool failure.
+fn coverage_command(args: &CoverageArgs) -> Exit {
+    let report = match coverage::run(&args.store) {
+        Ok(report) => report,
+        Err(err) => {
+            eprintln!("freshdag coverage: {err}");
+            return err.exit();
+        }
+    };
+
+    if args.json {
+        match coverage::to_json(&report) {
+            Ok(json) => println!("{json}"),
+            Err(err) => {
+                eprintln!("freshdag coverage: {err}");
+                return err.exit();
+            }
+        }
+    } else {
+        print!("{}", coverage::render(&report));
+    }
+
+    Exit::Valid
 }
 
 fn unimplemented_command(name: &str, artifact: Option<&str>) -> Exit {

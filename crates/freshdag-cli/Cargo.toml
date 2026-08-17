@@ -20,6 +20,8 @@ freshdag-engine.workspace = true
 freshdag-probes.workspace = true
 freshdag-store.workspace = true
 clap.workspace = true
+# `freshdag coverage --json` serializes its report.
+serde.workspace = true
 serde_json.workspace = true
 time.workspace = true
 # `freshdag mark` mints an IR event, so it needs an event id and the
