@@ -476,7 +476,9 @@ fn a_volatile_edge_inside_ttl_is_likely_valid_and_never_valid() {
     );
     assert_eq!(
         outcome.certificate.status.reasons[0].reason,
-        ReasonCode::TrustClassVolatileCapsAtLikelyValid
+        // No probe is registered in this fixture, so the edge is inside
+        // its TTL and unchecked — which after W9.1 is its own code.
+        ReasonCode::VolatileWithinTtlUnprobed
     );
 }
 
@@ -695,15 +697,38 @@ fn every_non_drift_outcome_gives_a_volatile_edge_the_same_verdict() {
         ),
     ];
 
-    let expected = (
-        ValidityStatus::LikelyValid,
-        vec![ReasonCode::TrustClassVolatileCapsAtLikelyValid],
-    );
-    for (label, actual) in &outcomes {
+    // The VERDICT is identical across every arm — that is this test's
+    // subject and the property ADR 0009 Amendment 2 turns on: inside a
+    // validated TTL only `Drift` may move a volatile edge, and only
+    // downward.
+    for (label, (status, _)) in &outcomes {
         assert_eq!(
-            actual, &expected,
+            *status,
+            ValidityStatus::LikelyValid,
             "`{label}` moved a volatile edge's verdict; inside a validated \
              TTL only Drift may, and only downward"
+        );
+    }
+
+    // The REASON is deliberately not identical, and W9.1 is why. A probe
+    // that ran and agreed is evidence; no probe at all is a declared
+    // lifetime and nothing else. Same verdict, different grounds, and
+    // the certificate has to say which (ADR 0009).
+    let probed = ReasonCode::TrustClassVolatileCapsAtLikelyValid;
+    let unprobed = ReasonCode::VolatileWithinTtlUnprobed;
+    let expected_reason = |label: &str| match label {
+        "probe matched" | "probe matched, reporting a higher class" => probed,
+        // Probe `Unknown` lands with the unprobed cases on purpose: a
+        // probe that ran and could not decide supplied no evidence, so
+        // the validated TTL is still all there is.
+        _ => unprobed,
+    };
+    for (label, (_, reasons)) in &outcomes {
+        assert_eq!(
+            reasons,
+            &vec![expected_reason(label)],
+            "`{label}` carries the wrong reason code; the certificate must \
+             distinguish a checked volatile edge from an unchecked one"
         );
     }
 }
@@ -788,7 +813,11 @@ fn a_volatile_edge_returns_to_likely_valid_when_its_drifting_probe_is_removed() 
     );
     assert_eq!(
         after.certificate.status.reasons[0].reason,
-        ReasonCode::TrustClassVolatileCapsAtLikelyValid
+        // The probe is gone, so nothing checked this edge on the second
+        // pass. It is the unprobed case, and after W9.1 it says so —
+        // reporting the probed code here would tell a user a probe
+        // agreed when the probe has been uninstalled.
+        ReasonCode::VolatileWithinTtlUnprobed
     );
     assert!(
         after

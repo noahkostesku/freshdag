@@ -172,9 +172,34 @@ pub enum ReasonCode {
     /// invariant #8 forbids reporting it as `Valid`, so the artifact
     /// status is capped at `LikelyValid`.
     TrustClassHeuristicCapsAtLikelyValid,
-    /// Edge-scoped. The edge matched inside its TTL at `Volatile`
-    /// trust, so the artifact status is capped at `LikelyValid`.
+    /// Edge-scoped. A probe **ran and matched** on a `Volatile` edge
+    /// inside its TTL, so the artifact status is capped at
+    /// `LikelyValid`.
+    ///
+    /// Contrast [`ReasonCode::VolatileWithinTtlUnprobed`], which is the
+    /// same verdict on strictly weaker evidence. Collapsing the two —
+    /// which this codebase did until ADR 0009's split landed — reports
+    /// "a probe checked and agreed" where the truth is "nothing checked
+    /// this at all", to a user reading `freshdag why` and to any
+    /// third-party rechecker reading the certificate.
     TrustClassVolatileCapsAtLikelyValid,
+    /// Edge-scoped. A `Volatile` edge is inside a validated TTL and
+    /// **no probe ran**: none is registered for the scheme, arbitration
+    /// tied, or the probe that recorded the fingerprint was removed.
+    ///
+    /// This is the only place in FreshDAG where "no probe ran" is not
+    /// [`ReasonCode::NoProbeAvailable`] and not `Unknown`. The producer
+    /// asserted a lifetime, `ARCHITECTURE.md §7` gives that declaration
+    /// standing as evidence, and the edge is inside it — so the verdict
+    /// is `LikelyValid`. What the declaration does *not* supply is a
+    /// check, and this code is how the certificate says so out loud.
+    ///
+    /// **`--accept-likely-valid` does not lift an edge carrying this
+    /// code to exit 0.** That flag means "I accept a heuristically
+    /// verified result"; here nothing was verified. Accepting it would
+    /// turn a declared lifetime into a substitute for observation,
+    /// which is invariant #7 with extra steps.
+    VolatileWithinTtlUnprobed,
     /// Edge-scoped. A `Volatile` dependency's TTL elapsed without
     /// re-observation.
     TtlExpired,
@@ -194,6 +219,20 @@ pub enum ReasonCode {
     /// observed dependencies — absence of evidence is not evidence of
     /// freshness.
     NoDependenciesObserved,
+    /// Edge-scoped. The same dependency was observed more than once
+    /// within one computation with different fingerprints: the input
+    /// changed while the agent was reading it.
+    ///
+    /// The recorded fingerprint is therefore not a statement about what
+    /// the computation consumed — it is one of at least two, and the
+    /// engine cannot know which the agent actually used. An artifact
+    /// with such a conflict can never be `Valid` (ADR 0009).
+    ///
+    /// The store has recorded these conflicts all along; the engine
+    /// surfaced them only as a `graph.edge_conflict` diagnostic,
+    /// explicitly because no reason code existed and adding one is a
+    /// contract change. This is that code.
+    DependencyChangedDuringComputation,
 }
 
 impl ReasonCode {
@@ -222,6 +261,8 @@ impl ReasonCode {
             Self::CoverageDeficit => "coverage-deficit",
             Self::ProducerMissingFromCoverage => "producer-missing-from-coverage",
             Self::NoDependenciesObserved => "no-dependencies-observed",
+            Self::VolatileWithinTtlUnprobed => "volatile-within-ttl-unprobed",
+            Self::DependencyChangedDuringComputation => "dependency-changed-during-computation",
         }
     }
 
@@ -243,8 +284,10 @@ impl ReasonCode {
             | Self::NoProbeAvailable
             | Self::TrustClassHeuristicCapsAtLikelyValid
             | Self::TrustClassVolatileCapsAtLikelyValid
+            | Self::VolatileWithinTtlUnprobed
             | Self::TtlExpired
-            | Self::ProbeTrustDemoted => false,
+            | Self::ProbeTrustDemoted
+            | Self::DependencyChangedDuringComputation => false,
         }
     }
 }

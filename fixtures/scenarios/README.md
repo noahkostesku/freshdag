@@ -58,6 +58,8 @@ scenario file:
   `trust-class-heuristic-caps-at-likely-valid`,
   `trust-class-volatile-caps-at-likely-valid`, `ttl-expired`,
   `coverage-deficit`, `no-dependencies-observed`,
+  `volatile-within-ttl-unprobed`,
+  `dependency-changed-during-computation`,
   `probe-trust-demoted`, `producer-missing-from-coverage`. See
   `schemas/scenario/v0.1.json`.
 

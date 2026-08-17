@@ -68,9 +68,26 @@ fn prose(code: ReasonCode) -> &'static str {
              likely-valid and not enough to say valid."
         }
         ReasonCode::TrustClassVolatileCapsAtLikelyValid => {
-            "This dependency has no trustworthy freshness signal at all. It is\n\
-             asserted fresh only for the length of its declared TTL, which has\n\
-             not yet elapsed."
+            "This dependency has no trustworthy freshness signal at all. A probe\n\
+             re-read it and agreed it is unchanged, but that signal cannot\n\
+             support more than likely-valid. It is also inside its declared\n\
+             TTL."
+        }
+        ReasonCode::VolatileWithinTtlUnprobed => {
+            "NOTHING CHECKED THIS DEPENDENCY. It is being treated as fresh\n\
+             purely because whoever recorded it declared a lifetime, and that\n\
+             lifetime has not elapsed. No probe is registered for its scheme,\n\
+             or the one that recorded it has since been removed. A declared\n\
+             lifetime is a promise, not an observation, so --accept-likely-valid\n\
+             will not treat this as reusable."
+        }
+        ReasonCode::DependencyChangedDuringComputation => {
+            "This dependency changed WHILE the agent was reading it: the same\n\
+             input was observed twice during one computation with two different\n\
+             contents. Nothing records which of the two the agent actually\n\
+             used, so the recorded fingerprint is not a statement about what\n\
+             this artifact was built from. Re-run the computation to get an\n\
+             artifact whose inputs held still."
         }
         ReasonCode::TtlExpired => {
             "This dependency's declared TTL elapsed without it being\n\
