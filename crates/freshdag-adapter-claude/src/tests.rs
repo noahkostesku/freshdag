@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use crate::compile::Compiler;
 use crate::config::{AdapterConfig, PRODUCER, UNKNOWN_SESSION_ID};
-use crate::coverage::coverage_manifest;
+use crate::coverage::{coverage_manifest, coverage_manifest_for};
 use crate::determinism::{FixedClock, SeededIdGen};
 use crate::identity::{computation_id_for_session, SESSION_AS_COMPUTATION_V1};
 use crate::sink::JsonlSink;
@@ -588,6 +588,66 @@ fn coverage_json_matches_the_rust_constructor() {
     let from_file: freshdag_core::ir::CoverageManifest =
         serde_json::from_str(&raw).expect("coverage.json parses as a CoverageManifest");
     assert_eq!(from_file, coverage_manifest());
+}
+
+/// Suppressing a kind must narrow the published manifest.
+///
+/// A manifest declaring a kind the adapter has been configured not to
+/// emit is a fail-*open* lie: silence under a *covered* kind is
+/// `ObservedAbsent` ("nothing happened"), while silence under an
+/// unclaimed kind is `Unobserved` ("I cannot say"). Publishing the
+/// un-narrowed manifest would turn a suppressed adapter's silence into
+/// evidence.
+#[test]
+fn suppression_narrows_the_published_manifest() {
+    use freshdag_core::ir::EventKindPattern;
+
+    let full = coverage_manifest_for(&AdapterConfig::new());
+    assert!(
+        full.emits.iter().any(|p| p.as_str() == "fs.read"),
+        "test is vacuous unless the un-narrowed manifest declares fs.read"
+    );
+
+    let suppressed = coverage_manifest_for(
+        &AdapterConfig::new().with_suppressed_kinds(vec![EventKindPattern::new("fs.*")]),
+    );
+    assert!(
+        !suppressed.emits.iter().any(|p| p.as_str() == "fs.read"),
+        "a suppressed fs.read must not still be declared"
+    );
+    assert!(
+        !suppressed.emits.iter().any(|p| p.as_str() == "fs.write"),
+        "a suppressed fs.write must not still be declared"
+    );
+    assert!(
+        !suppressed.partial.keys().any(|k| k.starts_with("fs.")),
+        "partial notes about suppressed kinds describe nothing"
+    );
+    assert!(
+        suppressed.emits.iter().any(|p| p.as_str() == "tool.*"),
+        "suppressing fs.* must not disturb unrelated declarations"
+    );
+}
+
+/// The coarse direction of the narrowing is deliberate: an exact
+/// suppression drops the whole glob that contains it. Over-dropping
+/// under-claims coverage, which caps an artifact at `unknown`; the
+/// opposite error would license `valid`.
+#[test]
+fn an_exact_suppression_drops_the_glob_that_contains_it() {
+    use freshdag_core::ir::EventKindPattern;
+
+    let narrowed = coverage_manifest_for(
+        &AdapterConfig::new().with_suppressed_kinds(vec![EventKindPattern::new("tool.invoked")]),
+    );
+    assert!(
+        !narrowed.emits.iter().any(|p| p.as_str() == "tool.*"),
+        "`tool.*` intersects the suppressed `tool.invoked` and must be dropped whole"
+    );
+    assert!(
+        narrowed.emits.iter().any(|p| p.as_str() == "fs.read"),
+        "an unrelated declaration survives"
+    );
 }
 
 #[test]

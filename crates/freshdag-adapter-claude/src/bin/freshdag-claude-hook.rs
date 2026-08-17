@@ -21,42 +21,82 @@
 //! # Usage
 //!
 //! ```text
-//! freshdag-claude-hook [--sink PATH] [--suppress PATTERN[,PATTERN...]]
+//! freshdag-claude-hook [--store DIR] [--sink PATH] [--no-store]
+//!                      [--suppress PATTERN[,PATTERN...]]
 //!                      [--max-bytes N] [--stdout]
 //!
-//!   --sink PATH       JSONL sink. Env: FRESHDAG_SINK / FRESHDAG_CLAUDE_SINK
+//!   --store DIR       Store root. Events go to DIR/events.jsonl and this
+//!                     adapter's coverage manifest is published to
+//!                     DIR/coverage.jsonl. Default `.freshdag`.
+//!                     Env: FRESHDAG_STORE
+//!   --sink PATH       Write events to PATH instead of DIR/events.jsonl.
+//!                     The manifest still goes to the store.
+//!                     Env: FRESHDAG_SINK / FRESHDAG_CLAUDE_SINK
+//!   --no-store        Publish no manifest, and default no sink. Events
+//!                     are discarded unless --sink or --stdout is given.
+//!                     For exercising the compiler in isolation.
 //!   --suppress PATS   Coverage override; comma-separated event-kind
-//!                     patterns (e.g. `fs.*,tool.completed`).
+//!                     patterns (e.g. `fs.*,tool.completed`). Narrows the
+//!                     published manifest to match.
 //!                     Env: FRESHDAG_CLAUDE_SUPPRESS
 //!   --max-bytes N     Sink byte cap. Env: FRESHDAG_CLAUDE_MAX_SINK_BYTES
 //!   --stdout          Also print events to stdout. DEBUGGING ONLY —
 //!                     never use while registered as a live hook.
 //! ```
+//!
+//! # Why a store and not a bare file
+//!
+//! An IR log whose producer has no coverage manifest evaluates to
+//! `unknown` on every artifact — `producer-missing-from-coverage` — so
+//! events written without a manifest look like evidence and decide
+//! nothing. Publishing the manifest is adapter-contract §Required
+//! Behavior 4, and pointing the default at the same `.freshdag` root
+//! `freshdag check` reads is what lets the two halves of the loop meet
+//! without configuration.
 
 use std::io::Read;
+use std::path::Path;
 use std::process::ExitCode;
 
 use freshdag_adapter_claude::compile::Compiler;
 use freshdag_adapter_claude::config::{AdapterConfig, UNKNOWN_SESSION_ID};
+use freshdag_adapter_claude::coverage::coverage_manifest_for;
 use freshdag_adapter_claude::diagnostic::{Diagnostic, DiagnosticCode};
 use freshdag_adapter_claude::sink::JsonlSink;
 use freshdag_core::ir::EventKindPattern;
+use freshdag_store::{CoverageRegistry, ProducerKey, COVERAGE_FILE_NAME, LOG_FILE_NAME};
+
+/// Store root used when neither `--store` nor `$FRESHDAG_STORE` is set.
+/// Matches `freshdag check`'s own default so the two halves of the loop
+/// meet without configuration.
+const DEFAULT_STORE: &str = ".freshdag";
 
 const HELP: &str = "\
 freshdag-claude-hook — compile one Claude Code hook payload into canonical IR
 
 USAGE:
-    freshdag-claude-hook [--sink PATH] [--suppress PATTERNS] [--max-bytes N] [--stdout]
+    freshdag-claude-hook [--store DIR] [--sink PATH] [--no-store]
+                         [--suppress PATTERNS] [--max-bytes N] [--stdout]
+
+    --store DIR   Store root (default `.freshdag`, env FRESHDAG_STORE).
+                  Events -> DIR/events.jsonl, manifest -> DIR/coverage.jsonl.
+    --sink PATH   Write events to PATH instead (env FRESHDAG_SINK).
+    --no-store    Publish no manifest and default no sink.
+    --suppress    Comma-separated event-kind patterns to suppress.
+    --max-bytes   Sink byte cap.
+    --stdout      Also print events to stdout. Debugging only.
 
 Reads one JSON hook payload on stdin. Always exits 0.
 ";
 
 #[derive(Debug, Default)]
 struct Args {
+    store: Option<String>,
     sink: Option<String>,
     suppress: Vec<String>,
     max_bytes: Option<u64>,
     stdout: bool,
+    no_store: bool,
     help: bool,
 }
 
@@ -64,6 +104,8 @@ fn parse_args<I: Iterator<Item = String>>(mut it: I) -> Result<Args, String> {
     let mut args = Args::default();
     while let Some(arg) = it.next() {
         match arg.as_str() {
+            "--store" => args.store = Some(it.next().ok_or("--store requires a path")?),
+            "--no-store" => args.no_store = true,
             "--sink" => args.sink = Some(it.next().ok_or("--sink requires a path")?),
             "--suppress" => {
                 let raw = it.next().ok_or("--suppress requires a pattern list")?;
@@ -118,6 +160,11 @@ fn main() -> ExitCode {
     config =
         config.with_suppressed_kinds(patterns.into_iter().map(EventKindPattern::new).collect());
 
+    // The manifest must describe the configuration the events were
+    // actually compiled under — `--suppress` narrows what this adapter
+    // emits, and a manifest claiming the un-suppressed set would
+    // overstate its coverage.
+    let compiler_config = config.clone();
     let mut compiler = Compiler::production(config);
     let events = compiler.compile_str(&input);
 
@@ -130,15 +177,42 @@ fn main() -> ExitCode {
         }
     }
 
-    let Some(sink_path) = args
+    // Resolve the store first: it decides where the coverage manifest
+    // goes and, unless `--sink` overrides it, where events go too.
+    let store_root = if args.no_store {
+        None
+    } else {
+        Some(
+            args.store
+                .or_else(|| std::env::var("FRESHDAG_STORE").ok())
+                .unwrap_or_else(|| DEFAULT_STORE.to_string()),
+        )
+    };
+
+    // Publish the coverage manifest before writing any events. A log
+    // whose producer has no manifest evaluates to `unknown` on every
+    // artifact (`producer-missing-from-coverage`), so events without a
+    // manifest are worse than useless — they look like evidence and
+    // decide nothing.
+    if let Some(root) = &store_root {
+        publish_manifest(Path::new(root), &compiler_config);
+    }
+
+    let sink_path = args
         .sink
         .or_else(|| std::env::var("FRESHDAG_SINK").ok())
         .or_else(|| std::env::var("FRESHDAG_CLAUDE_SINK").ok())
-    else {
+        .or_else(|| {
+            store_root
+                .as_ref()
+                .map(|r| Path::new(r).join(LOG_FILE_NAME).display().to_string())
+        });
+
+    let Some(sink_path) = sink_path else {
         if !args.stdout {
             eprintln!(
-                "freshdag-claude-hook: no sink configured (--sink or $FRESHDAG_SINK); \
-                 {} event(s) discarded",
+                "freshdag-claude-hook: no sink configured (--store, --sink, or \
+                 $FRESHDAG_SINK); {} event(s) discarded",
                 events.len()
             );
         }
@@ -167,6 +241,49 @@ fn main() -> ExitCode {
         report_drop(&mut compiler, &sink, &events, outcome.dropped);
     }
     ExitCode::SUCCESS
+}
+
+/// Publish this adapter's coverage manifest into `<store>/coverage.jsonl`,
+/// once per `(producer, version)`.
+///
+/// Registration is skipped when a manifest for this exact
+/// `(producer, version)` is already on file, because this binary runs
+/// once per hook event and the registry appends unconditionally. Two
+/// hook processes racing may still append the same record twice; that is
+/// harmless, since the registry keys manifests by `(producer, version)`
+/// on load.
+///
+/// Every failure here is reported to stderr and otherwise ignored. This
+/// process is in the runtime's critical path (adapter-contract §Errors
+/// and Backpressure) and must not fail a tool call over bookkeeping.
+fn publish_manifest(store_root: &Path, config: &AdapterConfig) {
+    let manifest = coverage_manifest_for(config);
+    let path = store_root.join(COVERAGE_FILE_NAME);
+
+    let mut registry = match CoverageRegistry::open(&path) {
+        Ok(registry) => registry,
+        Err(err) => {
+            eprintln!(
+                "freshdag-claude-hook: could not open {}: {err}",
+                path.display()
+            );
+            return;
+        }
+    };
+
+    if registry
+        .manifest(&ProducerKey::of_manifest(&manifest))
+        .is_some()
+    {
+        return;
+    }
+
+    if let Err(err) = registry.register(manifest) {
+        eprintln!(
+            "freshdag-claude-hook: could not publish coverage manifest to {}: {err}",
+            path.display()
+        );
+    }
 }
 
 /// Record a back-pressure drop as a `diagnostic`. The record of a drop
