@@ -338,11 +338,15 @@ mod coverage_deficit {
         ir_event(producer, EventKind::ToolInvoked, payload)
     }
 
-    /// The coverage an adapter publishes for the Claude Code runtime.
-    /// Mirrors adapter-contract §Required Behavior #4's example: it
-    /// sees `tool.*` and synthesizes `fs.read`/`fs.write` from the
-    /// Read/Write/Edit tools, but filesystem effects *inside* a Bash
+    /// An adapter-role manifest, shaped like a runtime adapter's: it
+    /// sees `tool.*` and synthesizes `fs.read`/`fs.write` from
+    /// read/write tool inputs, but filesystem effects *inside* a Bash
     /// subprocess are observer territory.
+    ///
+    /// Deliberately not "the Claude adapter's manifest". This is a local
+    /// fixture; what `freshdag-adapter-claude` actually declares lives
+    /// in `crates/freshdag-adapter-claude/src/coverage.rs` and is not
+    /// what this test is about (ADR 0011, Amendment, Ruling 5).
     fn adapter_manifest(emits: &[&str]) -> CoverageManifest {
         CoverageManifest {
             role: ProducerRole::Adapter,
@@ -665,17 +669,24 @@ mod coverage_deficit {
     /// producer whose `emits` matched `fs.read`/`fs.write`, and
     /// `CoverageEntry` carried no way to tell the difference.
     ///
-    /// That was not hypothetical: adapter-contract §Required Behavior
-    /// #4's canonical manifest declares exactly
-    /// `emits: [..., "fs.read", "fs.write"]` with
-    /// `partial: { "fs.read": "only from Read tool; subprocess reads
-    /// via observer" }` — the adapter's own `partial` note states the
-    /// fact that should disqualify it, with nothing enforcing it. So
-    /// once real producer manifests were attached to certificates, the
-    /// Claude adapter's fs claim would have discharged the obligation
-    /// for a Bash invocation it explicitly did not observe, making the
-    /// rule vacuous on exactly the platform (macOS) it exists to
-    /// protect.
+    /// That was not hypothetical.
+    /// `crates/freshdag-adapter-claude/src/coverage.rs` declares
+    /// `emits: [..., "fs.read", "fs.write"]` alongside an `fs.*` entry
+    /// reading "FILESYSTEM EFFECTS INSIDE `bash` AND `task`
+    /// INVOCATIONS ARE INVISIBLE TO THIS ADAPTER" — the producer's own
+    /// manifest states the fact that should disqualify it, with nothing
+    /// enforcing it. So once real producer manifests were attached to
+    /// certificates, the Claude adapter's fs claim would have
+    /// discharged the obligation for a Bash invocation it explicitly
+    /// did not observe, making the rule vacuous on exactly the platform
+    /// (macOS) it exists to protect.
+    ///
+    /// An earlier revision of this comment sourced that claim from
+    /// adapter-contract §Required Behavior #4's *example* manifest.
+    /// Ruling 5 forbids exactly that: an example describes shape, never
+    /// what a shipped producer declares. The conclusion survived the
+    /// correction, but the evidence chain was the one that produced ADR
+    /// 0011's original error, so it now cites the source file.
     ///
     /// The fix is `ProducerRole`: only `role: Observer` discharges.
     /// This test pins the *role* half of the rule — vantage point —

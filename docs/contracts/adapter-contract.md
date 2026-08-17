@@ -35,16 +35,40 @@ An adapter MUST:
 
    ```json
    {
-     "producer": "freshdag-adapter-claude",
+     "producer": "freshdag-adapter-example",
      "version": "0.1.0",
      "role": "adapter",
-     "emits": ["session.*", "computation.*", "tool.*", "fs.read", "fs.write"],
+     "emits": ["session.*", "computation.*", "tool.*", "fs.read", "fs.write", "net.fetch"],
      "partial": {
-       "fs.read":  "only from Read tool; subprocess reads via observer",
-       "net.fetch": "only from WebFetch tool"
+       "fs.read": {
+         "reason": "under-approximates",
+         "note": "only from the runtime's read tool; subprocess reads are observer territory"
+       },
+       "net.fetch": {
+         "reason": "under-approximates",
+         "note": "only from the runtime's fetch tool"
+       }
      }
    }
    ```
+
+   > **Illustrative, never descriptive** (ADR 0011, Amendment,
+   > Ruling 5). This is the *shape* a conformant adapter publishes; it
+   > is not a claim about `freshdag-adapter-claude` or anything else in
+   > `crates/`. No ADR, engine branch, test, or review may cite it as
+   > evidence of what a shipped producer declares — cite the source
+   > file. The shipped Claude adapter's manifest is
+   > `crates/freshdag-adapter-claude/src/coverage.rs`, mirrored in
+   > `coverage.json`, and it declares five `partial` entries rather than
+   > these two.
+   >
+   > Two details are load-bearing and easy to copy wrong. `partial`
+   > values are `{reason, note}` objects from the closed vocabulary in
+   > `certificate-contract.md §Partial Coverage` — a bare string is the
+   > pre-ADR-0011 shape and decodes as `under-approximates`. And every
+   > kind carrying a `partial` entry must also appear in `emits`;
+   > annotating a kind you do not emit declares nothing, because
+   > `covers()` reads `emits` alone.
 
 5. **Fail loudly on unknown runtime events.** If the runtime emits a
    payload the adapter cannot classify, emit a diagnostic event; do

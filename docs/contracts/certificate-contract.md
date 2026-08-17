@@ -50,7 +50,7 @@ that shared certificates cannot be silently rewritten.
     "computation_id": "opaque",
     "recipe":       "research-account",
     "recipe_hash":  "blake3:...",
-    "adapter":      "freshdag-adapter-claude/0.1.0",
+    "adapter":      "freshdag-adapter-example/0.1.0",
     "started":      "2026-08-15T13:45:12.001Z",
     "ended":        "2026-08-15T13:46:07.892Z"
   },
@@ -95,7 +95,7 @@ that shared certificates cannot be silently rewritten.
     "reasons":  []                    // populated when not "valid"
   },
   "observation_coverage": [
-    { "producer": "freshdag-adapter-claude", "version": "0.1.0",
+    { "producer": "freshdag-adapter-example", "version": "0.1.0",
       "role": "adapter", "emits": ["tool.*", "fs.read", "fs.write"],
       "partial": {
         "fs.*": { "reason": "blind-in-scope",
