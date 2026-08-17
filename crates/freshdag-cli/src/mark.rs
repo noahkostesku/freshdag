@@ -20,14 +20,23 @@
 //! bytes on disk now; the computation is whichever one the store
 //! records writing them.
 //!
-//! If the recorded write carried a content hash and the file's current
-//! bytes do not match it, `mark` **refuses**. Something outside
-//! FreshDAG's observation changed the file after the computation wrote
-//! it, so that computation did not produce these bytes, and minting an
-//! artifact that says otherwise would be exactly the invariant-#7
-//! failure this tool exists to prevent. (`Edit`/`MultiEdit` writes carry
-//! no hash — the hook payload has only a splice — so for those there is
-//! nothing to compare and `mark` proceeds.)
+//! `mark` refuses unless the recorded write carries a content hash AND
+//! the file's current bytes match it.
+//!
+//! A mismatch means something outside FreshDAG's observation changed the
+//! file after the computation wrote it, so that computation did not
+//! produce these bytes.
+//!
+//! **An absent hash is refused too**, and an earlier revision got this
+//! wrong: it let the check fall through, reasoning that
+//! `Edit`/`MultiEdit`/`NotebookEdit` carry only a splice so there was
+//! nothing to compare. But these `fs.write` events are synthesized at
+//! PreToolUse, so even a *denied* edit records one — and the
+//! fall-through then attributed the artifact to whichever computation
+//! last touched the path, on no evidence, erasing the real producer's
+//! dependencies from the certificate. Minting an artifact on an
+//! unverifiable write is the invariant-#9 failure this tool exists to
+//! prevent, so it does not.
 
 use std::path::{Path, PathBuf};
 
@@ -36,7 +45,7 @@ use freshdag_core::ir::{
     CoverageManifest, EventKind, EventKindPattern, Hash, HashAlgo, IrEvent, ProducerRole,
 };
 use freshdag_store::{
-    AppendOutcome, CoverageRegistry, ProducerKey, Store, StoreError, COVERAGE_FILE_NAME,
+    linearize, AppendOutcome, CoverageRegistry, ProducerKey, Store, StoreError, COVERAGE_FILE_NAME,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -75,6 +84,10 @@ pub enum MarkError {
     /// The store accepted the call but dropped the event under its byte
     /// budget.
     Dropped { total_dropped: u64 },
+    /// The most recent recorded write of this path carries no content
+    /// hash, so there is no way to tell whether the bytes on disk are
+    /// the ones that computation wrote.
+    UnverifiableWrite { path: PathBuf, tool_hint: String },
 }
 
 impl std::fmt::Display for MarkError {
@@ -116,6 +129,13 @@ impl std::fmt::Display for MarkError {
                 "the store dropped the artifact.produced event under its byte budget \
                  ({total_dropped} dropped so far), so nothing was recorded"
             ),
+            Self::UnverifiableWrite { path, tool_hint } => write!(
+                f,
+                "the most recent recorded write of {} ({tool_hint}) carries no content \
+                 hash, so nothing can show the bytes on disk are the ones that \
+                 computation wrote. Attributing them to it would be a guess",
+                path.display()
+            ),
         }
     }
 }
@@ -130,7 +150,8 @@ impl MarkError {
             Self::Unreadable { .. }
             | Self::NoRecordedWrite { .. }
             | Self::ContentDrifted { .. }
-            | Self::NoComputation { .. } => Exit::Usage,
+            | Self::NoComputation { .. }
+            | Self::UnverifiableWrite { .. } => Exit::Usage,
         }
     }
 }
@@ -172,21 +193,47 @@ pub fn run(store_root: &Path, path: &str, kind: Option<&str>) -> Result<Marked, 
     let mut store = Store::open(store_root).map_err(MarkError::Store)?;
     let events = store.read_log().map_err(MarkError::Store)?;
 
-    let write = latest_write_of(&events, &target).ok_or_else(|| MarkError::NoRecordedWrite {
+    let write = latest_write_of(events, &target).ok_or_else(|| MarkError::NoRecordedWrite {
         path: target.clone(),
     })?;
 
     // A recorded hash is the only thing that can tell us the file still
-    // holds the bytes that computation wrote. When there is one and it
-    // disagrees, refuse.
-    if let Some(recorded) = write.payload.get("hash").and_then(|v| v.as_str()) {
-        if recorded != on_disk.to_string() {
-            return Err(MarkError::ContentDrifted {
-                path: target,
-                recorded: recorded.to_string(),
-                on_disk: on_disk.to_string(),
-            });
-        }
+    // holds the bytes that computation wrote.
+    //
+    // When there is none, REFUSE. This previously fell through — `if let
+    // Some(recorded)` simply skipped the check — on the reasoning that
+    // `Edit`/`MultiEdit`/`NotebookEdit` payloads carry only a splice, so
+    // there was nothing to compare and refusing would make `mark`
+    // useless on edited files. That was wrong, and a verifier
+    // reproduced it: the fall-through attributes the artifact to
+    // whichever computation last *touched* the path, on no evidence at
+    // all. Because these `fs.write` events are synthesized at
+    // PreToolUse, even a **denied** edit records one — so an unrelated
+    // session that tried and failed to edit a file could claim
+    // authorship of another session's bytes, and the real producer's
+    // dependencies would vanish from the certificate. That is invariant
+    // #9 ("every artifact is traceable to the computation that produced
+    // it") broken outright.
+    //
+    // Refusing costs the ability to mark an edited file until the
+    // adapter can fingerprint an edit's result. That is the correct
+    // trade: an unmarkable artifact is an inconvenience, a
+    // misattributed one is a false provenance claim.
+    let Some(recorded) = write.payload.get("hash").and_then(|v| v.as_str()) else {
+        return Err(MarkError::UnverifiableWrite {
+            path: target,
+            tool_hint: "no `hash` on the recorded fs.write — Edit/MultiEdit/NotebookEdit \
+                        payloads carry only a splice, and a denied tool call still records \
+                        the write"
+                .to_string(),
+        });
+    };
+    if recorded != on_disk.to_string() {
+        return Err(MarkError::ContentDrifted {
+            path: target,
+            recorded: recorded.to_string(),
+            on_disk: on_disk.to_string(),
+        });
     }
 
     let computation = write
@@ -197,6 +244,20 @@ pub fn run(store_root: &Path, path: &str, kind: Option<&str>) -> Result<Marked, 
         })?;
 
     publish_manifest(store_root)?;
+
+    // Record the path in the form the PRODUCING WRITE used, not the
+    // realpath `fs::canonicalize` gave us. Every other path in the IR is
+    // in producer form — this adapter canonicalizes lexically and does
+    // not resolve symlinks — so minting the artifact under a realpath
+    // introduced a second convention, and `freshdag check <path>`, which
+    // matches exactly, then could not find it. On macOS that is every
+    // path under `mktemp -d` (`/var` -> `/private/var`), which broke
+    // `scripts/demo.sh` on the project's own development platform.
+    let recorded_path = write
+        .payload
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map_or_else(|| target.display().to_string(), ToString::to_string);
 
     let artifact = ArtifactId::from_hash(&on_disk);
     let event = IrEvent {
@@ -212,7 +273,7 @@ pub fn run(store_root: &Path, path: &str, kind: Option<&str>) -> Result<Marked, 
         kind: EventKind::ArtifactProduced,
         payload: serde_json::json!({
             "artifact_id": artifact.0,
-            "path": target.display().to_string(),
+            "path": recorded_path,
             "content_hash": on_disk.to_string(),
             "kind": kind.map_or_else(|| media_type_of(&target).to_string(), ToString::to_string),
             "size": bytes.len() as u64,
@@ -238,15 +299,52 @@ pub fn run(store_root: &Path, path: &str, kind: Option<&str>) -> Result<Marked, 
     })
 }
 
-/// The most recent `fs.write` recorded for `path`, in log order.
-fn latest_write_of<'e>(events: &'e [IrEvent], path: &Path) -> Option<&'e IrEvent> {
-    events.iter().rev().find(|e| {
+/// The most recent `fs.write` recorded for `path`, in **canonical**
+/// order.
+///
+/// Two things here were wrong and are load-bearing.
+///
+/// **Order.** This used physical log order (`events.iter().rev()`).
+/// `Store::read_log` returns events in the order they landed on disk,
+/// and the store explicitly supports arbitrary physical order — the
+/// graph and engine both sort by `order::linearize` first. With a
+/// batching producer or two processes appending concurrently, "last in
+/// the file" is not "last in time", so `mark` could attribute an
+/// artifact to an *earlier* write. It now linearizes first.
+///
+/// **Path form.** The comparison was `Path == Path` between a
+/// realpath (`fs::canonicalize`, used on the target) and whatever the
+/// producer recorded — and this adapter canonicalizes *lexically*,
+/// without resolving symlinks. On macOS every `/var/...` path is a
+/// symlink to `/private/var/...`, so the two never matched and `mark`
+/// refused every artifact under a `mktemp -d` workdir, including in
+/// `scripts/demo.sh`. Both sides are now put through the same
+/// resolution before comparing, falling back to the raw form for paths
+/// that no longer exist.
+fn latest_write_of(events: Vec<IrEvent>, path: &Path) -> Option<IrEvent> {
+    let ordered = linearize(events.into_iter());
+    ordered.into_iter().rev().find(|e| {
         e.kind == EventKind::FsWrite
             && e.payload
                 .get("path")
                 .and_then(|v| v.as_str())
-                .is_some_and(|p| Path::new(p) == path)
+                .is_some_and(|p| same_file(Path::new(p), path))
     })
+}
+
+/// Do these two paths name the same file, allowing for one side being
+/// lexical and the other a realpath?
+fn same_file(recorded: &Path, target: &Path) -> bool {
+    if recorded == target {
+        return true;
+    }
+    match (
+        std::fs::canonicalize(recorded),
+        std::fs::canonicalize(target),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// This CLI's coverage manifest, published once per `(producer,

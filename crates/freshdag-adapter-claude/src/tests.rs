@@ -179,6 +179,58 @@ fn bash_emits_tool_invoked_with_bash_kind_and_no_fs_events() {
     assert_eq!(events[0].payload["tool_name"], json!("bash"));
 }
 
+/// Both delegation spellings must raise the blindness signal.
+///
+/// The runtime emits `Agent`; the adapter only knew `Task`. A
+/// delegation classified as `Builtin` raises no observation obligation,
+/// so a subagent that read and wrote anything left no trace the
+/// coverage-deficit rule could see.
+#[test]
+fn every_delegation_spelling_is_task_kind() {
+    for spelling in crate::hook::TASK_TOOL_NAMES {
+        let events = compile(&pre_tool_use(
+            spelling,
+            &json!({"subagent_type": "verifier", "prompt": "rewrite everything"}),
+        ));
+        assert_eq!(
+            events[0].payload["tool_kind"],
+            json!("task"),
+            "`{spelling}` must be task-kind, or its blindness is invisible"
+        );
+        assert_eq!(
+            events[0].payload["tool_name"],
+            json!("task"),
+            "`{spelling}` must normalize to one spelling for the store to key on"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e.kind, EventKind::FsRead | EventKind::FsWrite)),
+            "`{spelling}` must synthesize no fs events"
+        );
+    }
+}
+
+/// A delegation spelling this adapter does not know falls to `Builtin`
+/// and silently re-opens the hole. This test does not prevent that — it
+/// records that the list is a hard-coded guess about a name the runtime
+/// does not promise, so a future rename fails here rather than in a
+/// certificate.
+#[test]
+fn unknown_delegation_spellings_are_not_silently_builtin() {
+    let events = compile(&pre_tool_use(
+        "Subagent",
+        &json!({"subagent_type": "x", "prompt": "p"}),
+    ));
+    assert_eq!(
+        events[0].payload["tool_kind"],
+        json!("builtin"),
+        "documents current behaviour: an unrecognized delegation name is \
+         indistinguishable from an ordinary tool, and raises no obligation. \
+         If the runtime renames the tool again, add it to TASK_TOOL_NAMES."
+    );
+}
+
 #[test]
 fn task_emits_tool_invoked_with_task_kind_and_no_fs_events() {
     let events = compile(&pre_tool_use(
