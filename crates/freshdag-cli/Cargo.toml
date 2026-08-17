@@ -22,6 +22,10 @@ freshdag-store.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 time.workspace = true
+# `freshdag mark` mints an IR event, so it needs an event id and the
+# artifact's content hash.
+uuid.workspace = true
+blake3.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true
