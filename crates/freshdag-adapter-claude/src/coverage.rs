@@ -323,6 +323,8 @@ fn known_limitations() -> Vec<String> {
          line or via the environment, not the override *file* named by the adapter \
          contract's §Configuration."
             .to_string(),
+        "PRE-READ FINGERPRINTS CAN NAME THE WRONG FILE. `fs.read` `hash`/`size` are taken by reading the path this adapter resolved LEXICALLY, at PreToolUse. Two cases record a `trust_class: exact` fingerprint for a file the tool did not consume: a `..` that traverses a symlinked directory (lexical resolution and the filesystem disagree, and the file hashed is not the file opened), and a change-and-revert between the hook and the read. Neither reports drift afterwards. Found by verifier review 2026-08-17."
+            .to_string(),
         "FAILED AND DENIED TOOL CALLS PRODUCE NO `tool.completed`. `PostToolUseFailure` and \
          `PermissionDenied` are not recognized by `HookEvent::parse`; they fall to an \
          info-severity `unknown-hook-event` diagnostic. Nothing is silently dropped, but the \

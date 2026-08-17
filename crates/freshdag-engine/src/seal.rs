@@ -124,6 +124,7 @@ fn artifact_reason_rank(code: ReasonCode) -> u8 {
         ReasonCode::ProducerMissingFromCoverage => 1,
         ReasonCode::NoDependenciesObserved => 2,
         ReasonCode::RecipeIdentityUnavailable => 3,
+        ReasonCode::UnprovenDependency => 4,
         // Edge-scoped codes never reach here; rank them last so a
         // future miscategorisation is visible rather than silent.
         _ => u8::MAX,
@@ -431,6 +432,7 @@ pub fn seal(input: SealInput<'_>) -> Result<Certificate, EngineError> {
                 ReasonCode::CoverageDeficit
                     | ReasonCode::ProducerMissingFromCoverage
                     | ReasonCode::RecipeIdentityUnavailable
+                    | ReasonCode::UnprovenDependency
             )
         });
     let final_status = if capped {

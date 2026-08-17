@@ -296,6 +296,34 @@ impl Engine {
                 detail: Some(format!("producer={}", names.join(","))),
             });
         }
+        // The store identifies observations it cannot promote to edges
+        // and records why. Before this, the engine evaluated
+        // `node.dependencies` and never looked at `node.excluded`, so an
+        // input the adapter saw but could not fingerprint vanished from
+        // the certificate — and `no-dependencies-observed` only fires
+        // when the set is empty, so a computation with three good edges
+        // and one unfingerprinted read certified over the three in
+        // silence. `is_unproven_dependency()` is the store's own answer
+        // to "does a dependency still exist here?"; read-after-own-write
+        // and impure reads correctly say no.
+        let mut unproven: BTreeSet<String> = BTreeSet::new();
+        for excluded in &node.excluded {
+            if excluded.reason.is_unproven_dependency() {
+                unproven.insert(excluded.key.as_ref().map_or_else(
+                    || format!("<{}>", excluded.kind.as_wire_str()),
+                    |k| k.0.clone(),
+                ));
+            }
+        }
+        if !unproven.is_empty() {
+            let keys: Vec<&str> = unproven.iter().map(String::as_str).collect();
+            artifact_reasons.push(ValidityReason {
+                dependency_key: String::new(),
+                reason: ReasonCode::UnprovenDependency,
+                detail: Some(format!("unproven={}", keys.join(","))),
+            });
+        }
+
         let mut deficit_details: Vec<String> = Vec::new();
         let effect_deficit = coverage::effect_deficit(&recorded_events, &observation_coverage);
         if !effect_deficit.is_empty() {

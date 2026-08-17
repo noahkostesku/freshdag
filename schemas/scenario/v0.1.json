@@ -59,7 +59,8 @@
                   "producer-missing-from-coverage",
                   "volatile-within-ttl-unprobed",
                   "dependency-changed-during-computation",
-                  "recipe-identity-unavailable"
+                  "recipe-identity-unavailable",
+                  "unproven-dependency"
                 ]
               }
             }
@@ -89,7 +90,8 @@
                   "producer-missing-from-coverage",
                   "volatile-within-ttl-unprobed",
                   "dependency-changed-during-computation",
-                  "recipe-identity-unavailable"
+                  "recipe-identity-unavailable",
+                  "unproven-dependency"
                 ]
               }
             },

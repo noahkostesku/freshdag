@@ -222,6 +222,71 @@ fn a_retryable_probe_failure_is_probe_unknown() {
     assert_eq!(checked.payload["retryable"], true);
 }
 
+/// An input the producer saw but could not fingerprint must reach the
+/// certificate.
+///
+/// The store keeps such an observation as an `ExcludedEdge` rather than
+/// a dependency — constructing one would fabricate the evidence
+/// invariant #7 requires. But the engine evaluated `node.dependencies`
+/// only and never consulted `node.excluded`, so the input vanished:
+/// three verified edges and one unfingerprinted read certified over the
+/// three in silence, because `no-dependencies-observed` fires only when
+/// the set is *empty*. Found by verifier review; reachable in practice
+/// because `DiskContent`'s byte cap emits exactly this shape.
+#[test]
+fn an_unfingerprinted_read_is_named_rather_than_dropped() {
+    let fp = "blake3:".to_string() + &blake3_of("notes");
+    let fixture = Fixture::new("unproven")
+        .with_file_edge("/repo/notes.md", &fp)
+        .with_unfingerprinted_read("/repo/enormous.bin");
+    let mut registry = ProbeRegistry::new();
+    registry
+        .register(Arc::new(ScriptedProbe::new("file").with_fallback(
+            ProbeResult::Match {
+                observed_fp: fp.parse().expect("fingerprint"),
+                observed_trust_class: TrustClass::Exact,
+            },
+        )))
+        .expect("register");
+    let outcome = fixture.engine(registry).check_ok();
+    let cert = outcome.certificate;
+
+    assert_eq!(
+        cert.depends_on.len(),
+        1,
+        "the unfingerprinted read is NOT promoted to a dependency"
+    );
+    let unproven: Vec<_> = cert
+        .status
+        .reasons
+        .iter()
+        .filter(|r| r.reason == ReasonCode::UnprovenDependency)
+        .collect();
+    assert_eq!(
+        unproven.len(),
+        1,
+        "the certificate must say an input went unchecked; reasons were {:?}",
+        cert.status
+            .reasons
+            .iter()
+            .map(|r| r.reason)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        unproven[0]
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.contains("enormous.bin")),
+        "the detail should name the key: {:?}",
+        unproven[0].detail
+    );
+    assert_ne!(
+        cert.status.value,
+        ValidityStatus::Valid,
+        "an artifact with an unverifiable input is not valid"
+    );
+}
+
 /// `retryable` MUST be absent when the result is not `unknown`.
 #[test]
 fn probe_checked_omits_retryable_unless_the_result_is_unknown() {

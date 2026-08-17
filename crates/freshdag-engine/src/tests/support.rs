@@ -125,6 +125,19 @@ impl Fixture {
         self
     }
 
+    /// An `fs.read` the producer could not fingerprint — what
+    /// `DiskContent` emits for a file over its byte cap, unreadable, or
+    /// deleted between stat and read. The store keeps it as an
+    /// `ExcludedEdge` with `NoFingerprint`, never as a dependency.
+    pub fn with_unfingerprinted_read(mut self, path: &str) -> Self {
+        self.body.push((
+            ADAPTER.to_string(),
+            EventKind::FsRead,
+            serde_json::json!({ "path": path, "size": 0, "size_observed": false }),
+        ));
+        self
+    }
+
     /// A `probe.checked`, which is how external dependencies enter the
     /// graph (the store deliberately derives no edge from a tool call).
     pub fn with_probe_edge(

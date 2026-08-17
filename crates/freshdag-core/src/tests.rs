@@ -439,6 +439,7 @@ const ALL_REASON_CODES: &[ReasonCode] = &[
     ReasonCode::VolatileWithinTtlUnprobed,
     ReasonCode::DependencyChangedDuringComputation,
     ReasonCode::RecipeIdentityUnavailable,
+    ReasonCode::UnprovenDependency,
 ];
 
 #[test]
@@ -448,6 +449,7 @@ fn reason_code_wire_form_is_exact() {
             ReasonCode::RecipeIdentityUnavailable,
             "recipe-identity-unavailable",
         ),
+        (ReasonCode::UnprovenDependency, "unproven-dependency"),
         (ReasonCode::Drift, "drift"),
         (ReasonCode::ProbeUnknown, "probe-unknown"),
         (ReasonCode::NoProbeAvailable, "no-probe-available"),
@@ -507,9 +509,17 @@ fn reason_code_serde_and_as_wire_str_agree() {
 
 #[test]
 fn reason_code_enumeration_is_complete() {
-    // Guards against a variant added to the enum but not to
-    // ALL_REASON_CODES (which would silently skip the sync check).
-    assert_eq!(ALL_REASON_CODES.len(), 13);
+    // NOTE: this does NOT guard what its name suggests. A variant added
+    // to the enum but omitted from ALL_REASON_CODES leaves this count
+    // untouched, and `schema_reason_enums_match_rust` compares the
+    // schemas against ALL_REASON_CODES rather than against the enum —
+    // so an omission at the top of the chain hides the whole chain. A
+    // verifier demonstrated this with a fourteenth variant that passed
+    // the entire suite. The real guard is the compiler: the exhaustive
+    // `match` in freshdag-cli's `prose()` will not build. What this
+    // assertion does catch is a duplicate or accidental deletion inside
+    // ALL_REASON_CODES itself.
+    assert_eq!(ALL_REASON_CODES.len(), 14);
     let mut wires: Vec<&str> = ALL_REASON_CODES.iter().map(|c| c.as_wire_str()).collect();
     wires.sort_unstable();
     wires.dedup();
@@ -529,6 +539,7 @@ fn reason_code_scopes_are_as_documented() {
                 | ReasonCode::ProducerMissingFromCoverage
                 | ReasonCode::NoDependenciesObserved
                 | ReasonCode::RecipeIdentityUnavailable
+                | ReasonCode::UnprovenDependency
         );
         assert_eq!(
             code.is_artifact_scoped(),
