@@ -53,6 +53,11 @@ use freshdag_observer::linux::parse_fsatrace_lines_with;
 /// Session id every fixture runs under, so goldens do not encode a
 /// caller's identity.
 const FIXTURE_SESSION: &str = "conformance-session";
+/// Producer identity this harness seeds the id generator for. It MUST
+/// equal the name the parser stamps into `IrEvent::producer` — the
+/// generator's tag is derived from it, so a mismatch would put the
+/// goldens in a different id space than production.
+const FIXTURE_PRODUCER: &str = "freshdag-observer-fsatrace";
 /// Producer version every fixture runs under, so goldens do not move
 /// when the crate version does.
 const FIXTURE_VERSION: &str = "0.0.0-conformance";
@@ -97,11 +102,17 @@ fn discover() -> Vec<(&'static str, PathBuf)> {
 /// Render a fixture's IR stream: one canonical JSON object per line.
 fn render(trace: &str) -> String {
     let clock = FixedClock::conformance();
-    let mut ids = SeededIdGen::conformance();
+    let mut ids = SeededIdGen::for_producer(FIXTURE_PRODUCER);
     let events =
         parse_fsatrace_lines_with(trace, FIXTURE_SESSION, FIXTURE_VERSION, &clock, &mut ids);
     let mut out = String::new();
     for e in &events {
+        assert_eq!(
+            e.producer, FIXTURE_PRODUCER,
+            "the harness seeded the id generator for a different producer than the \
+             parser stamps, so the goldens' ids would not be the ones this producer \
+             mints in production"
+        );
         out.push_str(&serde_json::to_string(e).expect("an IrEvent serializes"));
         out.push('\n');
     }
