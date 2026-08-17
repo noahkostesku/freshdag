@@ -21,7 +21,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use freshdag_core::artifact::ArtifactId;
 use freshdag_core::computation::ComputationId;
 use freshdag_core::dependency::{DependencyId, TrustClass};
-use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, IrEvent, ProducerRole};
+use freshdag_core::ir::{
+    CoverageManifest, EventKind, EventKindPattern, IrEvent, PartialCoverage, PartialReason,
+    ProducerRole,
+};
 use freshdag_store::{
     DerivedGraph, ExclusionReason, GraphDefect, SilenceMeaning, Store, DERIVED_FILES,
 };
@@ -425,7 +428,12 @@ fn manifests() -> Vec<CoverageManifest> {
     let mut observer = manifest(OBSERVER, "0.2.0", &["fs.*", "proc.*", "net.*"]);
     observer.partial.insert(
         "fs.dirlist".to_string(),
-        "directory listings are sampled, not exhaustive".to_string(),
+        // "sampled, not exhaustive" is a missed-event admission, so it
+        // is `under-approximates`, the fail-unsafe direction.
+        PartialCoverage::new(
+            PartialReason::UnderApproximates,
+            "directory listings are sampled, not exhaustive",
+        ),
     );
     observer.known_limitations = vec!["mmap reads are pessimistic".to_string()];
     vec![
@@ -906,7 +914,10 @@ fn silence_is_not_absence() {
     assert_eq!(
         graph.silence(&comp(COMP_A), EventKind::FsDirlist),
         Some(SilenceMeaning::PartiallyObserved(vec![
-            "directory listings are sampled, not exhaustive".to_string()
+            PartialCoverage::new(
+                PartialReason::UnderApproximates,
+                "directory listings are sampled, not exhaustive",
+            )
         ]))
     );
 

@@ -56,6 +56,7 @@ fn coverage(producer: &str) -> Vec<CoverageEntry> {
         version: "0.1.0".to_string(),
         role: ProducerRole::Adapter,
         emits: vec![EventKindPattern::new("fs.*")],
+        partial: std::collections::BTreeMap::new(),
         known_limitations: Vec::new(),
     }]
 }

@@ -29,7 +29,7 @@
 //! [`ReasonCode::TtlExpired`]: freshdag_core::dependency::ReasonCode::TtlExpired
 //! [`ReasonCode::NoProbeAvailable`]: freshdag_core::dependency::ReasonCode::NoProbeAvailable
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -901,6 +901,14 @@ fn engine_coverage_entry() -> CoverageEntry {
             EventKindPattern::new("probe.checked"),
             EventKindPattern::new("diagnostic"),
         ],
+        // Empty, and deliberately so: the engine emits a `probe.checked`
+        // for every probe it dispatches and a `diagnostic` for every
+        // fault it handles, so neither kind is partial *within its
+        // scope*. What the engine cannot see — external state with no
+        // registered probe — is not a partial declaration but the
+        // `known_limitations` entry below, because it is a limit on the
+        // evidence available, not on the fidelity of what it emits.
+        partial: BTreeMap::new(),
         known_limitations: vec!["sees external state only through registered probes".to_string()],
     }
 }

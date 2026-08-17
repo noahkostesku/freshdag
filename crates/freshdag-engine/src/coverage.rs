@@ -118,6 +118,7 @@ mod tests {
             version: "0.1.0".to_string(),
             role,
             emits: emits.iter().map(|s| EventKindPattern::new(*s)).collect(),
+            partial: std::collections::BTreeMap::new(),
             known_limitations: Vec::new(),
         }
     }
