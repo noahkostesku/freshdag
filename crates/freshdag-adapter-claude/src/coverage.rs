@@ -12,7 +12,9 @@
 
 use std::collections::BTreeMap;
 
-use freshdag_core::ir::{CoverageManifest, EventKindPattern, ProducerRole};
+use freshdag_core::ir::{
+    CoverageManifest, EventKindPattern, PartialCoverage, PartialReason, ProducerRole,
+};
 use serde_json::{json, Value};
 
 use crate::config::{AdapterConfig, PRODUCER};
@@ -59,54 +61,92 @@ fn manifest_with_version(version: &str, identity_rule: &str) -> CoverageManifest
     }
 }
 
-fn partial_notes() -> BTreeMap<String, String> {
+/// Every entry's `reason` is read off that entry's own note — what this
+/// adapter does and does not emit — and not off ADR 0011, which has no
+/// standing to classify a producer (ADR 0011, Amendment, Correction 1).
+///
+/// Where a note describes error in *both* directions, the reason is the
+/// fail-unsafe one. `fs.read` both over-reports (a denied Read still
+/// emits) and under-reports (reads by any other means are invisible);
+/// the vocabulary asks whether real events can be missed, and here they
+/// can, so it is `under-approximates`. Over-reporting costs staleness,
+/// which invariant #15 prefers; a missed read costs a spurious `valid`,
+/// which invariant #7 forbids. A manifest may not net the two out.
+///
+/// None of these classifications changes this adapter's behaviour
+/// today: `role: Adapter` already bars it from discharging an
+/// observation obligation, whatever its `partial` map says. They matter
+/// because the manifest reaches the certificate, where a third-party
+/// rechecker reads the direction rather than the prose.
+fn partial_notes() -> BTreeMap<String, PartialCoverage> {
     let mut m = BTreeMap::new();
+    // "Reads performed by any other means are invisible here."
     m.insert(
         "fs.read".to_string(),
-        "synthesized ONLY from the `Read` tool's `file_path` input on PreToolUse. \
-         Pre-execution intent, not a confirmed effect: a denied or failed Read still \
-         produces this event. `size` is a placeholder (`size_observed: false`) and `hash` \
-         is absent because the compile path never touches the filesystem. Reads performed \
-         by any other means are invisible here."
-            .to_string(),
+        PartialCoverage::new(
+            PartialReason::UnderApproximates,
+            "synthesized ONLY from the `Read` tool's `file_path` input on PreToolUse. \
+             Pre-execution intent, not a confirmed effect: a denied or failed Read still \
+             produces this event. `size` is a placeholder (`size_observed: false`) and `hash` \
+             is absent because the compile path never touches the filesystem. Reads performed \
+             by any other means are invisible here.",
+        ),
     );
+    // "synthesized ONLY from Write/Edit/MultiEdit/NotebookEdit inputs" —
+    // a write by any other route is not emitted.
     m.insert(
         "fs.write".to_string(),
-        "synthesized ONLY from `Write`/`Edit`/`MultiEdit`/`NotebookEdit` `file_path` \
-         (`notebook_path` for NotebookEdit) inputs on PreToolUse. Pre-execution intent, \
-         not a confirmed effect. `mode` is always `truncate` because hook payloads do not \
-         reveal prior existence. `size`/`hash` are real only for `Write` (whose input \
-         carries the full contents); the edit tools carry `size_observed: false` and no \
-         hash."
-            .to_string(),
+        PartialCoverage::new(
+            PartialReason::UnderApproximates,
+            "synthesized ONLY from `Write`/`Edit`/`MultiEdit`/`NotebookEdit` `file_path` \
+             (`notebook_path` for NotebookEdit) inputs on PreToolUse. Pre-execution intent, \
+             not a confirmed effect. `mode` is always `truncate` because hook payloads do not \
+             reveal prior existence. `size`/`hash` are real only for `Write` (whose input \
+             carries the full contents); the edit tools carry `size_observed: false` and no \
+             hash.",
+        ),
     );
+    // Structural blindness confined to a scope — subprocesses — which is
+    // exactly `blind-in-scope`. This is the broad admission that ADR
+    // 0011's Correction 4 uses as its worked example: it must not be
+    // annotated away by the narrower `fs.read`/`fs.write` entries above.
     m.insert(
         "fs.*".to_string(),
-        "FILESYSTEM EFFECTS INSIDE `bash` AND `task` INVOCATIONS ARE INVISIBLE TO THIS \
-         ADAPTER AND ARE OBSERVER TERRITORY. A hook payload exposes a Bash command line \
-         and a Task prompt, never the syscalls they perform. This adapter emits NO fs \
-         events for tool_kind `bash` or `task`, which is what lets \
-         `Certificate::check_coverage_deficit` force a non-`valid` status when no \
-         fs-covering observer is present."
-            .to_string(),
+        PartialCoverage::new(
+            PartialReason::BlindInScope,
+            "FILESYSTEM EFFECTS INSIDE `bash` AND `task` INVOCATIONS ARE INVISIBLE TO THIS \
+             ADAPTER AND ARE OBSERVER TERRITORY. A hook payload exposes a Bash command line \
+             and a Task prompt, never the syscalls they perform. This adapter emits NO fs \
+             events for tool_kind `bash` or `task`, which is what lets \
+             `Certificate::check_coverage_deficit` force a non-`valid` status when no \
+             fs-covering observer is present.",
+        ),
     );
+    // Degraded fields on events that are all still emitted: coarser than
+    // reality, never missing. That is the `over-approximates` row.
     m.insert(
         "tool.completed".to_string(),
-        "`duration_ms` is always 0 with `duration_observed: false` — Claude Code hook \
-         payloads carry no timing. `is_error: false` means `no error signal was present \
-         in tool_response`, not `the tool succeeded`. No `causal_inputs` links a \
-         tool.completed to its tool.invoked: each hook fires in its own process and this \
-         adapter keeps no cross-invocation state; the normalized `tool_name` is carried \
-         on the payload so a consumer can correlate."
-            .to_string(),
+        PartialCoverage::new(
+            PartialReason::OverApproximates,
+            "`duration_ms` is always 0 with `duration_observed: false` — Claude Code hook \
+             payloads carry no timing. `is_error: false` means `no error signal was present \
+             in tool_response`, not `the tool succeeded`. No `causal_inputs` links a \
+             tool.completed to its tool.invoked: each hook fires in its own process and this \
+             adapter keeps no cross-invocation state; the normalized `tool_name` is carried \
+             on the payload so a consumer can correlate.",
+        ),
     );
+    // A resumed, cleared or compacted session emits no `computation.started`
+    // at all — a missing event, not a coarse one.
     m.insert(
         "computation.*".to_string(),
-        "one Claude Code session is one computation. `computation.started` is emitted \
-         only on `SessionStart` with `source: startup`; resume/clear/compact starts emit \
-         a `computation-bracket-skipped` diagnostic instead of reopening the bracket. \
-         `Task` subagents are NOT sliced into sub-computations under this identity rule."
-            .to_string(),
+        PartialCoverage::new(
+            PartialReason::UnderApproximates,
+            "one Claude Code session is one computation. `computation.started` is emitted \
+             only on `SessionStart` with `source: startup`; resume/clear/compact starts emit \
+             a `computation-bracket-skipped` diagnostic instead of reopening the bracket. \
+             `Task` subagents are NOT sliced into sub-computations under this identity rule.",
+        ),
     );
     m
 }
