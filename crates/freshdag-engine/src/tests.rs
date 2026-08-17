@@ -353,16 +353,38 @@ fn an_unrepresentable_ttl_is_expired_not_a_panic() {
 #[test]
 fn a_large_but_representable_ttl_is_still_inside_its_window() {
     // Fixture observations sit at UNIX_EPOCH + 20_000 days; a century of
-    // seconds is comfortably inside `OffsetDateTime`'s range.
+    // seconds is comfortably inside `OffsetDateTime`'s range, so this
+    // TTL must be refused by the *ceiling*, not by the arithmetic. The
+    // two guards carry distinct details; confusing them would hide a
+    // regression in either.
     let secs = 100 * 365 * 24 * 60 * 60;
-    let fixture = Fixture::new("ttl-large").with_probe_edge(
-        "web.search",
-        "q=acme",
-        &format!("blake3:{}", blake3_of("search")),
-        TrustClass::Volatile,
-        Some(secs),
+    let build = || {
+        Fixture::new("ttl-large").with_probe_edge(
+            "web.search",
+            "q=acme",
+            &format!("blake3:{}", blake3_of("search")),
+            TrustClass::Volatile,
+            Some(secs),
+        )
+    };
+    let outcome = build().engine(ProbeRegistry::new()).check_ok();
+    assert_eq!(outcome.certificate.status.value, ValidityStatus::Unknown);
+    assert!(
+        outcome.certificate.status.reasons[0]
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.contains("exceeds max_volatile_ttl")),
+        "a representable TTL must be refused by the ceiling: {:?}",
+        outcome.certificate.status.reasons[0].detail
     );
-    let outcome = fixture.engine(ProbeRegistry::new()).check_ok();
+
+    // Raise the ceiling past it and the same TTL is a live window, so
+    // the arithmetic really did represent it.
+    let outcome = build()
+        .engine_with(ProbeRegistry::new(), |b| {
+            b.max_volatile_ttl(std::time::Duration::from_secs(secs))
+        })
+        .check_ok();
     assert_eq!(
         outcome.certificate.status.value,
         ValidityStatus::LikelyValid
@@ -390,6 +412,132 @@ fn a_volatile_edge_inside_ttl_is_likely_valid_and_never_valid() {
     assert_eq!(
         outcome.certificate.status.reasons[0].reason,
         ReasonCode::TrustClassVolatileCapsAtLikelyValid
+    );
+}
+
+/// ADR 0009 Amendment 1: a declared TTL is evidence only within the
+/// engine's configured maximum. `ttl_seconds: 1000000000` (~31 years) is
+/// well-formed, representable, and unexpired — and must still be
+/// `unknown`, because a producer cannot buy freshness with a large
+/// integer.
+#[test]
+fn a_ttl_beyond_the_configured_maximum_is_not_evidence() {
+    let secs = 1_000_000_000_u64;
+    let fixture = Fixture::new("ttl-too-long").with_probe_edge(
+        "web.search",
+        "q=acme",
+        &format!("blake3:{}", blake3_of("search")),
+        TrustClass::Volatile,
+        Some(secs),
+    );
+    let outcome = fixture.engine(ProbeRegistry::new()).check_ok();
+
+    assert_eq!(
+        outcome.certificate.status.value,
+        ValidityStatus::Unknown,
+        "a 31-year declared lifetime is an unbounded assertion, not evidence"
+    );
+    assert_eq!(
+        outcome.certificate.status.reasons[0].reason,
+        ReasonCode::TtlExpired
+    );
+    assert_eq!(
+        outcome.certificate.status.reasons[0].detail.as_deref(),
+        Some(
+            format!(
+                "ttl_seconds={secs} exceeds max_volatile_ttl={}",
+                crate::DEFAULT_MAX_VOLATILE_TTL.as_secs()
+            )
+            .as_str()
+        )
+    );
+}
+
+/// The bound is the *engine's*, not the producer's: an operator who
+/// deliberately raises it gets the longer window, and the default is a
+/// default rather than a hardcode.
+#[test]
+fn the_volatile_ttl_ceiling_is_injectable() {
+    let secs = 1_000_000_000_u64;
+    let fixture = Fixture::new("ttl-too-long-raised").with_probe_edge(
+        "web.search",
+        "q=acme",
+        &format!("blake3:{}", blake3_of("search")),
+        TrustClass::Volatile,
+        Some(secs),
+    );
+    let outcome = fixture
+        .engine_with(ProbeRegistry::new(), |b| {
+            b.max_volatile_ttl(std::time::Duration::from_secs(secs))
+        })
+        .check_ok();
+    assert_eq!(
+        outcome.certificate.status.value,
+        ValidityStatus::LikelyValid
+    );
+}
+
+/// The default ceiling is 24h and is not silently something else.
+#[test]
+fn the_default_volatile_ttl_ceiling_is_twenty_four_hours() {
+    assert_eq!(crate::DEFAULT_MAX_VOLATILE_TTL.as_secs(), 24 * 60 * 60);
+}
+
+/// ADR 0009 Amendment 2: a `probe.checked` dated in the future satisfies
+/// `now > expires_at == false` forever, so a future `observed_at` is an
+/// unbounded TTL in disguise. Beyond the skew tolerance it is `unknown`.
+#[test]
+fn a_future_observed_at_is_not_evidence() {
+    let fixture = Fixture::new("future-observation").with_probe_edge(
+        "web.search",
+        "q=acme",
+        &format!("blake3:{}", blake3_of("search")),
+        TrustClass::Volatile,
+        Some(3600),
+    );
+    let engine = fixture.engine(ProbeRegistry::new());
+    // Rewind the checking clock far behind the observation, which is
+    // indistinguishable from the observation being dated far ahead.
+    engine.clock.advance(-time::Duration::days(365 * 73));
+    let outcome = engine.check_ok();
+
+    assert_eq!(outcome.certificate.status.value, ValidityStatus::Unknown);
+    assert_eq!(
+        outcome.certificate.status.reasons[0].reason,
+        ReasonCode::TtlExpired
+    );
+    assert_eq!(
+        outcome.certificate.status.reasons[0].detail.as_deref(),
+        Some(
+            format!(
+                "observed_at-in-future skew_tolerance_seconds={}",
+                crate::MAX_CLOCK_SKEW.as_secs()
+            )
+            .as_str()
+        )
+    );
+}
+
+/// Ordinary skew between the producing and the checking host must not
+/// invalidate anything: the tolerance exists because two machines need
+/// not share a clock.
+#[test]
+fn skew_inside_the_tolerance_is_still_evidence() {
+    let fixture = Fixture::new("small-skew").with_probe_edge(
+        "web.search",
+        "q=acme",
+        &format!("blake3:{}", blake3_of("search")),
+        TrustClass::Volatile,
+        Some(3600),
+    );
+    let engine = fixture.engine(ProbeRegistry::new());
+    // The fixture's clock sits 300s after the observation; move it to
+    // 30s *before*, which is inside the 60s tolerance.
+    engine.clock.advance(-time::Duration::seconds(300 + 30));
+    let outcome = engine.check_ok();
+    assert_eq!(
+        outcome.certificate.status.value,
+        ValidityStatus::LikelyValid
     );
 }
 

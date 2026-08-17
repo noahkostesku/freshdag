@@ -305,15 +305,27 @@ impl Fixture {
     /// Build the engine, with the clock frozen shortly after the
     /// computation ended.
     pub fn engine(self, probes: ProbeRegistry) -> TestEngine {
+        self.engine_with(probes, |b| b)
+    }
+
+    /// As [`Fixture::engine`], letting the test adjust the builder — for
+    /// the tests that need a non-default `max_volatile_ttl`.
+    pub fn engine_with(
+        self,
+        probes: ProbeRegistry,
+        tune: impl FnOnce(crate::EngineBuilder) -> crate::EngineBuilder,
+    ) -> TestEngine {
         let clock = Arc::new(FixedClock::new(
             Self::base_ts() + time::Duration::seconds(300),
         ));
-        let engine = Engine::builder()
-            .events(self.events())
-            .coverage(self.coverage())
-            .probes(probes)
-            .clock(clock.clone())
-            .build();
+        let engine = tune(
+            Engine::builder()
+                .events(self.events())
+                .coverage(self.coverage())
+                .probes(probes)
+                .clock(clock.clone()),
+        )
+        .build();
         TestEngine {
             engine,
             clock,

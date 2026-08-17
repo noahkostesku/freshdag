@@ -1,13 +1,13 @@
 {
-  "scenario": "volatile-external-dep",
+  "scenario": "volatile-external-dep-probed",
   "schema": "freshdag.scenario/v0.1",
-  "description": "The recipe calls web.search \u2014 a source with no trustworthy freshness signal. Certificate status is capped at likely-valid within TTL and unknown after TTL expires. It MUST never be valid.",
+  "description": "The same web.search dependency as volatile-external-dep, with a probe registered and answering match. The certificate MUST be identical: ARCHITECTURE.md \u00a77 decides a volatile edge from its declared TTL, as a positive branch before probe arbitration, so whether an operator happens to have installed a probe for the scheme is not evidence about the world.",
   "input_observations": [
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000040",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000140",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-probed",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:13.000000000Z",
       "kind": "computation.started",
@@ -17,10 +17,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000041",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000141",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-probed",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:14.220000000Z",
       "kind": "tool.invoked",
@@ -34,10 +34,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000042",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000142",
       "producer": "freshdag-probe-web-search",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-probed",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:14.500000000Z",
       "kind": "probe.checked",
@@ -51,10 +51,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000043",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000143",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-probed",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.100000000Z",
       "kind": "tool.completed",
@@ -65,10 +65,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000044",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000144",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-probed",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.200000000Z",
       "kind": "fs.write",
@@ -80,10 +80,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000045",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000145",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-probed",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.300000000Z",
       "kind": "artifact.produced",
@@ -98,10 +98,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000046",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000146",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-probed",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.400000000Z",
       "kind": "computation.ended",
@@ -134,10 +134,15 @@
     }
   },
   "notes": [
-    "fixture 7 in docs/EVALUATION.md \u00a72",
-    "after_mutation=unknown models the TTL-expiry case; no world mutation required",
-    "There is deliberately no input_probes block: no probe ships for web.search and none can, so this scenario also pins the engine's volatile rule from ARCHITECTURE.md \u00a77 \u2014 inside TTL is likely-valid, outside is unknown. The harness advances its injected clock past ttl_seconds to reach after_mutation.",
-    "This is the UNPROBED arm. volatile-external-dep-probed is the probed arm and expects an identical certificate; that identity is what stops this fixture enshrining an arbitration-failure path as the volatile answer (ADR 0009, Amendment, constraint 4).",
-    "BLOCKED: ADR 0009 requires this arm pin `volatile-within-ttl-unprobed` rather than `trust-class-volatile-caps-at-likely-valid`. That reason code does not exist in freshdag-core yet; adding it is a contract-change PR owned by core-engineer (ReasonCode enum, schemas/certificate/v0.1.json, schemas/scenario/v0.1.json). Update this block and the probed sibling together when it lands."
-  ]
+    "sibling of fixture 7 in docs/EVALUATION.md \u00a72, added by the ADR 0009 amendment",
+    "volatile-external-dep is the unprobed arm; this is the probed arm. Their expected blocks are deliberately identical -- that identity IS the assertion. Wave 2 shipped the volatile rule inside arbitration's Err(no_probe) arm, where these two would have disagreed: unprobed likely-valid, probed unknown, on the strength of probe registration alone.",
+    "after_mutation=unknown is reached the same way as in the unprobed arm: the harness advances its injected clock past ttl_seconds. The scripted probe still answers match, which must not rescue an elapsed TTL."
+  ],
+  "input_probes": {
+    "web.search://q=acme pricing changes 2026": {
+      "trust_class": "volatile",
+      "no_change_yields": "match",
+      "after_mutation_yields": "match"
+    }
+  }
 }

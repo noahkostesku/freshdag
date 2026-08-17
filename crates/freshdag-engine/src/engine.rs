@@ -4,7 +4,7 @@
 //!
 //! 1. **Trust class `volatile` first, in full.** ARCHITECTURE §7 defines
 //!    such an edge entirely by its declared TTL — inside the window it
-//!    is `Match` capped at LikelyValid, outside it (or with no usable
+//!    is `Match` capped at `LikelyValid`, outside it (or with no usable
 //!    declaration) `Unknown` with [`ReasonCode::TtlExpired`]. §7's
 //!    amendment requires this be a *positive* branch keyed on the trust
 //!    class and evaluated before probe arbitration, so that registering
@@ -56,6 +56,45 @@ pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// bytes").
 const MAX_DETAIL_BYTES: usize = 512;
 
+/// Longest `ttl_seconds` a producer can declare and still have it
+/// treated as evidence (ADR 0009, Amendment; `ARCHITECTURE.md §7`).
+///
+/// §7 licenses "volatile inside TTL → likely-valid" on the grounds that
+/// the producer's declared lifetime is *present evidence*. That argument
+/// holds only while the declaration is bounded: without a ceiling,
+/// `ttl_seconds: 1000000000` (~31 years) behaves exactly like
+/// `ttl_seconds: 3600`, and a producer buys unlimited freshness with a
+/// large integer. The RFC 9111 analogy does not rescue it — HTTP's
+/// `max-age` arrives from an origin over an authenticated channel and
+/// §4.2.3 requires the cache validate a `Date` before computing age;
+/// FreshDAG has neither.
+///
+/// 24 hours is the architect's conservative judgment call, not a derived
+/// quantity: a `volatile` dependency is by definition one with no
+/// trustworthy freshness signal, so a day is already generous. It is
+/// injectable via [`EngineBuilder::max_volatile_ttl`] precisely so a
+/// design partner with legitimately longer-lived volatile dependencies
+/// can raise it deliberately rather than by editing this constant.
+pub const DEFAULT_MAX_VOLATILE_TTL: std::time::Duration =
+    std::time::Duration::from_secs(24 * 60 * 60);
+
+/// How far into the future a recorded `observed_at` may sit before the
+/// engine stops believing it (ADR 0009, Amendment).
+///
+/// A `probe.checked` dated 2099 satisfies `now > expires_at == false`
+/// forever, so a future timestamp is an unbounded TTL wearing a
+/// disguise. Some tolerance is required because the producing host and
+/// the checking host are not the same machine and need not share a
+/// clock.
+///
+/// One minute: NTP-disciplined hosts stay within milliseconds of each
+/// other and even badly-configured ones rarely exceed seconds, so a
+/// minute absorbs ordinary skew while leaving a decade-away timestamp a
+/// hard failure. Deliberately not injectable — unlike a TTL ceiling,
+/// there is no legitimate workload that needs a larger one, and a knob
+/// here would be a knob for disabling the check.
+pub const MAX_CLOCK_SKEW: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// What one `check` produced.
 #[derive(Debug, Clone)]
 pub struct CheckOutcome {
@@ -76,6 +115,7 @@ pub struct Engine {
     registry: ProbeRegistry,
     clock: Arc<dyn Clock>,
     ledger: Mutex<TrustLedger>,
+    max_volatile_ttl: std::time::Duration,
 }
 
 impl Engine {
@@ -301,6 +341,15 @@ impl Engine {
         //    for `web.search://…` and `unknown` for `file:///…` on the
         //    strength of the scheme alone.
         //
+        //    A declared TTL is evidence only where it is *bounded* and
+        //    its timestamp is *real* (ADR 0009, Amendment). Three
+        //    guards, in order: the declaration must be representable,
+        //    it must be within `max_volatile_ttl`, and the timestamp it
+        //    is measured from must not be in the future. Each failure
+        //    is `Unknown` / `TtlExpired` — the class is bounded, never
+        //    discarded, so `volatile` stays usable for the dependencies
+        //    (`time.now()`) that no probe can ever answer for.
+        //
         //    Nothing here can reach `Valid`. The recorded class stays
         //    `Volatile`, which `Validity::aggregate` caps at LikelyValid
         //    and `Certificate::check_invariants` refuses outright at
@@ -318,6 +367,30 @@ impl Engine {
                     format!("ttl_seconds={secs} not-representable"),
                 );
             };
+            // A producer must not be able to buy freshness with a large
+            // integer.
+            let max = self.max_volatile_ttl.as_secs();
+            if secs > max {
+                return unknown(
+                    ReasonCode::TtlExpired,
+                    format!("ttl_seconds={secs} exceeds max_volatile_ttl={max}"),
+                );
+            }
+            // A future `observed_at` is an unbounded TTL in disguise:
+            // `now > expires_at` is false forever. TTL arithmetic must
+            // not go negative-fresh.
+            if now
+                .checked_add(skew_tolerance())
+                .is_some_and(|horizon| dep.observed_at > horizon)
+            {
+                return unknown(
+                    ReasonCode::TtlExpired,
+                    format!(
+                        "observed_at-in-future skew_tolerance_seconds={}",
+                        MAX_CLOCK_SKEW.as_secs()
+                    ),
+                );
+            }
             if now > expires_at {
                 return unknown(ReasonCode::TtlExpired, format!("ttl_seconds={secs}"));
             }
@@ -807,6 +880,12 @@ fn ttl_expiry(observed_at: OffsetDateTime, ttl_seconds: u64) -> Option<OffsetDat
     observed_at.checked_add(time::Duration::seconds(seconds))
 }
 
+/// [`MAX_CLOCK_SKEW`] as a `time::Duration`, for comparing against the
+/// difference of two [`OffsetDateTime`]s.
+fn skew_tolerance() -> time::Duration {
+    time::Duration::try_from(MAX_CLOCK_SKEW).unwrap_or(time::Duration::ZERO)
+}
+
 /// The `depends_on[].trust_class` wire spelling.
 fn trust_wire(class: TrustClass) -> &'static str {
     match class {
@@ -857,6 +936,7 @@ pub struct EngineBuilder {
     coverage: CoverageRegistry,
     registry: ProbeRegistry,
     clock: Option<Arc<dyn Clock>>,
+    max_volatile_ttl: Option<std::time::Duration>,
 }
 
 impl EngineBuilder {
@@ -890,6 +970,19 @@ impl EngineBuilder {
         self
     }
 
+    /// Cap how long a declared `volatile` TTL may be and still count as
+    /// evidence. Defaults to [`DEFAULT_MAX_VOLATILE_TTL`] (24h).
+    ///
+    /// Raising this weakens `ARCHITECTURE.md §7`'s "the declared TTL is
+    /// present evidence" argument in proportion, which is why it is a
+    /// deliberate call at the call site rather than a constant someone
+    /// edits.
+    #[must_use]
+    pub fn max_volatile_ttl(mut self, max: std::time::Duration) -> Self {
+        self.max_volatile_ttl = Some(max);
+        self
+    }
+
     /// Materialize the derived graph and build the engine.
     #[must_use]
     pub fn build(self) -> Engine {
@@ -900,6 +993,7 @@ impl EngineBuilder {
             registry: self.registry,
             clock: self.clock.unwrap_or_else(|| Arc::new(SystemClock)),
             ledger: Mutex::new(TrustLedger::new()),
+            max_volatile_ttl: self.max_volatile_ttl.unwrap_or(DEFAULT_MAX_VOLATILE_TTL),
         }
     }
 }

@@ -56,7 +56,10 @@ mod tests;
 
 pub use antithrash::{TrustLedger, TrustTransition, ESCALATION_THRESHOLD};
 pub use clock::{Clock, FixedClock, SystemClock};
-pub use engine::{is_usable, CheckOutcome, Engine, EngineBuilder, ENGINE_PRODUCER, ENGINE_VERSION};
+pub use engine::{
+    is_usable, CheckOutcome, Engine, EngineBuilder, DEFAULT_MAX_VOLATILE_TTL, ENGINE_PRODUCER,
+    ENGINE_VERSION, MAX_CLOCK_SKEW,
+};
 pub use error::EngineError;
 pub use registry::{NoProbe, ProbeIdentity, ProbeRegistry, RegistrationError, Selected};
 pub use scripted::ScriptedProbe;

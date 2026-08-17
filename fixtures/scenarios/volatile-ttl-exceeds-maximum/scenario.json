@@ -1,13 +1,13 @@
 {
-  "scenario": "volatile-external-dep",
+  "scenario": "volatile-ttl-exceeds-maximum",
   "schema": "freshdag.scenario/v0.1",
-  "description": "The recipe calls web.search \u2014 a source with no trustworthy freshness signal. Certificate status is capped at likely-valid within TTL and unknown after TTL expires. It MUST never be valid.",
+  "description": "The same web.search dependency declaring ttl_seconds: 1000000000 (~31 years). It is well-formed, representable and unexpired, and MUST still be unknown: ARCHITECTURE.md \u00a77 treats a declared TTL as evidence only within the engine's max_volatile_ttl. A producer cannot buy freshness with a large integer.",
   "input_observations": [
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000040",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000240",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-long-ttl",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:13.000000000Z",
       "kind": "computation.started",
@@ -17,10 +17,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000041",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000241",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-long-ttl",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:14.220000000Z",
       "kind": "tool.invoked",
@@ -34,10 +34,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000042",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000242",
       "producer": "freshdag-probe-web-search",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-long-ttl",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:14.500000000Z",
       "kind": "probe.checked",
@@ -46,15 +46,15 @@
         "key": "q=acme pricing changes 2026",
         "observed_fingerprint": "blake3:47e2ee3be83f06c1c0a43cef2fe5a269bacf79a159e0b42b2a6b6fca3d63659d",
         "trust_class": "volatile",
-        "ttl_seconds": 3600,
+        "ttl_seconds": 1000000000,
         "result": "match"
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000043",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000243",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-long-ttl",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.100000000Z",
       "kind": "tool.completed",
@@ -65,10 +65,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000044",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000244",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-long-ttl",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.200000000Z",
       "kind": "fs.write",
@@ -80,10 +80,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000045",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000245",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-long-ttl",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.300000000Z",
       "kind": "artifact.produced",
@@ -98,10 +98,10 @@
       }
     },
     {
-      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000046",
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000246",
       "producer": "freshdag-adapter-claude",
       "producer_version": "0.1.0",
-      "session_id": "sess-volatile",
+      "session_id": "sess-volatile-long-ttl",
       "computation_id": "comp:f08a66ae0eefdb195f3516260b98d481eca4fd40861fcb28eb219545421e6031",
       "ts": "2026-08-15T13:45:15.400000000Z",
       "kind": "computation.ended",
@@ -119,25 +119,16 @@
       }
     ],
     "certificate_status": {
-      "value": "likely-valid",
+      "value": "unknown",
       "reason_codes": [
-        "trust-class-volatile-caps-at-likely-valid"
-      ]
-    },
-    "invalidation": {
-      "before_mutation": "likely-valid",
-      "after_mutation": "unknown",
-      "after_mutation_reason_codes": [
         "ttl-expired"
-      ],
-      "mutated_dependency_keys": []
+      ]
     }
   },
   "notes": [
-    "fixture 7 in docs/EVALUATION.md \u00a72",
-    "after_mutation=unknown models the TTL-expiry case; no world mutation required",
-    "There is deliberately no input_probes block: no probe ships for web.search and none can, so this scenario also pins the engine's volatile rule from ARCHITECTURE.md \u00a77 \u2014 inside TTL is likely-valid, outside is unknown. The harness advances its injected clock past ttl_seconds to reach after_mutation.",
-    "This is the UNPROBED arm. volatile-external-dep-probed is the probed arm and expects an identical certificate; that identity is what stops this fixture enshrining an arbitration-failure path as the volatile answer (ADR 0009, Amendment, constraint 4).",
-    "BLOCKED: ADR 0009 requires this arm pin `volatile-within-ttl-unprobed` rather than `trust-class-volatile-caps-at-likely-valid`. That reason code does not exist in freshdag-core yet; adding it is a contract-change PR owned by core-engineer (ReasonCode enum, schemas/certificate/v0.1.json, schemas/scenario/v0.1.json). Update this block and the probed sibling together when it lands."
+    "added by the ADR 0009 amendment (2026-08-16), which bounds the volatile TTL",
+    "31 years vs 3600 seconds behaved identically before the amendment, which is the hole: \u00a77's 'the declared TTL is present evidence' argument holds only while the declaration is bounded.",
+    "No invalidation block: the edge is already unknown before any mutation, so there is nothing for a mutation to demonstrate.",
+    "The sibling case -- an observed_at dated in the future -- is covered by crates/freshdag-engine/src/tests.rs::a_future_observed_at_is_not_evidence and NOT by a scenario, because the harness derives its injected clock from the newest event timestamp and so cannot express a checking clock behind the observation. Expressing it as a fixture needs a scenario-level `now`, which is a schemas/scenario change."
   ]
 }
