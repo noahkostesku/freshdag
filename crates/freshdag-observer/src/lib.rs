@@ -29,6 +29,7 @@
 
 mod observer;
 
+pub mod determinism;
 pub mod linux;
 pub mod replay;
 pub mod stub;
