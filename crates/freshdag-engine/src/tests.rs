@@ -310,6 +310,65 @@ fn an_expired_ttl_is_unknown_with_ttl_expired() {
     );
 }
 
+/// A `ttl_seconds` too large to add to `observed_at` must not panic, and
+/// must not be read as "not expired".
+///
+/// `OffsetDateTime + Duration` panics on overflow and `ttl_seconds` is
+/// an unvalidated `u64` off the log. `u64::MAX` is the obvious spelling
+/// of "never expires" and `300000000000` is a seconds/nanoseconds unit
+/// confusion; both used to abort the process with exit 101. An expiry
+/// the engine cannot compute is indistinguishable from no TTL having
+/// been recorded, so it degrades to `ttl-expired` / `unknown`.
+#[test]
+fn an_unrepresentable_ttl_is_expired_not_a_panic() {
+    for secs in [300_000_000_000_u64, u64::MAX] {
+        let fixture = Fixture::new("ttl-overflow").with_probe_edge(
+            "web.search",
+            "q=acme",
+            &format!("blake3:{}", blake3_of("search")),
+            TrustClass::Volatile,
+            Some(secs),
+        );
+        let outcome = fixture.engine(ProbeRegistry::new()).check_ok();
+
+        assert_eq!(
+            outcome.certificate.status.value,
+            ValidityStatus::Unknown,
+            "ttl_seconds={secs} must degrade, not be believed"
+        );
+        assert_eq!(
+            outcome.certificate.status.reasons[0].reason,
+            ReasonCode::TtlExpired
+        );
+        assert_eq!(
+            outcome.certificate.status.reasons[0].detail.as_deref(),
+            Some(format!("ttl_seconds={secs} not-representable").as_str()),
+            "the detail distinguishes an unrepresentable TTL from an elapsed one"
+        );
+    }
+}
+
+/// The boundary case the previous test must not swallow: the largest TTL
+/// that *is* representable still behaves as a live window.
+#[test]
+fn a_large_but_representable_ttl_is_still_inside_its_window() {
+    // Fixture observations sit at UNIX_EPOCH + 20_000 days; a century of
+    // seconds is comfortably inside `OffsetDateTime`'s range.
+    let secs = 100 * 365 * 24 * 60 * 60;
+    let fixture = Fixture::new("ttl-large").with_probe_edge(
+        "web.search",
+        "q=acme",
+        &format!("blake3:{}", blake3_of("search")),
+        TrustClass::Volatile,
+        Some(secs),
+    );
+    let outcome = fixture.engine(ProbeRegistry::new()).check_ok();
+    assert_eq!(
+        outcome.certificate.status.value,
+        ValidityStatus::LikelyValid
+    );
+}
+
 /// ARCHITECTURE §7's other half: inside the TTL a `volatile` edge is
 /// `likely-valid` — and can never be bare `valid`, whatever else holds.
 #[test]

@@ -284,13 +284,22 @@ impl Engine {
                 None => {
                     return unknown(ReasonCode::TtlExpired, "ttl_seconds=absent".to_string());
                 }
-                Some(secs) => {
-                    let expires_at = dep.observed_at
-                        + time::Duration::seconds(i64::try_from(secs).unwrap_or(i64::MAX));
-                    if now > expires_at {
+                Some(secs) => match ttl_expiry(dep.observed_at, secs) {
+                    // A TTL we cannot turn into an instant is not
+                    // evidence that the window is open; it is the
+                    // absence of a usable declaration. Invariant #7:
+                    // treat it exactly as an elapsed TTL.
+                    None => {
+                        return unknown(
+                            ReasonCode::TtlExpired,
+                            format!("ttl_seconds={secs} not-representable"),
+                        );
+                    }
+                    Some(expires_at) if now > expires_at => {
                         return unknown(ReasonCode::TtlExpired, format!("ttl_seconds={secs}"));
                     }
-                }
+                    Some(_) => {}
+                },
             }
         }
 
@@ -762,6 +771,27 @@ fn engine_event_id(at: OffsetDateTime, sequence: u16) -> Uuid {
     // RFC 4122 variant.
     bytes[8] = 0x80;
     Uuid::from_bytes(bytes)
+}
+
+/// The instant a `volatile` dependency's declared TTL elapses, if that
+/// instant is representable.
+///
+/// `ttl_seconds` is an unvalidated `u64` read off the log, and
+/// `OffsetDateTime + Duration` is `checked_add(..).expect(..)` — it
+/// panics on overflow. Two entirely plausible inputs reach that panic:
+/// `u64::MAX`, the obvious spelling of "never expires", and a
+/// seconds/nanoseconds unit confusion such as `300000000000`. A producer
+/// is not a trusted party; a malformed number in the log must degrade a
+/// verdict, never abort the process.
+///
+/// Returns `None` when the TTL exceeds `i64` seconds or when adding it
+/// to `observed_at` leaves `OffsetDateTime`'s representable range. The
+/// caller treats `None` as an elapsed TTL: an expiry we cannot compute
+/// is indistinguishable from no meaningful TTL having been recorded, and
+/// invariant #7 says what we cannot prove is not fresh.
+fn ttl_expiry(observed_at: OffsetDateTime, ttl_seconds: u64) -> Option<OffsetDateTime> {
+    let seconds = i64::try_from(ttl_seconds).ok()?;
+    observed_at.checked_add(time::Duration::seconds(seconds))
 }
 
 /// The `depends_on[].trust_class` wire spelling.
