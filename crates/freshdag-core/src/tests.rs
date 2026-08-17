@@ -436,6 +436,8 @@ const ALL_REASON_CODES: &[ReasonCode] = &[
     ReasonCode::CoverageDeficit,
     ReasonCode::ProducerMissingFromCoverage,
     ReasonCode::NoDependenciesObserved,
+    ReasonCode::VolatileWithinTtlUnprobed,
+    ReasonCode::DependencyChangedDuringComputation,
 ];
 
 #[test]
@@ -462,6 +464,14 @@ fn reason_code_wire_form_is_exact() {
         (
             ReasonCode::NoDependenciesObserved,
             "no-dependencies-observed",
+        ),
+        (
+            ReasonCode::VolatileWithinTtlUnprobed,
+            "volatile-within-ttl-unprobed",
+        ),
+        (
+            ReasonCode::DependencyChangedDuringComputation,
+            "dependency-changed-during-computation",
         ),
     ] {
         assert_eq!(
@@ -494,7 +504,7 @@ fn reason_code_serde_and_as_wire_str_agree() {
 fn reason_code_enumeration_is_complete() {
     // Guards against a variant added to the enum but not to
     // ALL_REASON_CODES (which would silently skip the sync check).
-    assert_eq!(ALL_REASON_CODES.len(), 10);
+    assert_eq!(ALL_REASON_CODES.len(), 12);
     let mut wires: Vec<&str> = ALL_REASON_CODES.iter().map(|c| c.as_wire_str()).collect();
     wires.sort_unstable();
     wires.dedup();

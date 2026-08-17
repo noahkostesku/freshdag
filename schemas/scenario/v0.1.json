@@ -56,7 +56,9 @@
                   "coverage-deficit",
                   "no-dependencies-observed",
                   "probe-trust-demoted",
-                  "producer-missing-from-coverage"
+                  "producer-missing-from-coverage",
+                  "volatile-within-ttl-unprobed",
+                  "dependency-changed-during-computation"
                 ]
               }
             }
@@ -83,7 +85,9 @@
                   "coverage-deficit",
                   "no-dependencies-observed",
                   "probe-trust-demoted",
-                  "producer-missing-from-coverage"
+                  "producer-missing-from-coverage",
+                  "volatile-within-ttl-unprobed",
+                  "dependency-changed-during-computation"
                 ]
               }
             },

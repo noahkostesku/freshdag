@@ -117,7 +117,11 @@ goals:
 - `cert-negative-suite` — the six anti-patterns from the certificate
   contract.
 - `mcp-nondeterministic-response` — identical `tool_input`, drifting
-  `tool_response`.
+  `tool_response`. The file-level version of this shipped first as
+  `dep-changed-mid-computation` (ADR 0009 §Consequences): the same
+  `fs.read` twice in one computation with different hashes, asserting
+  `unknown` + `dependency-changed-during-computation`. It is the cheaper
+  half; this entry stays open for the MCP shape.
 - `empty-deps` — artifact with zero observed inputs (should be
   suspicious, not silently valid).
 - `unicode-path` — NFC vs NFD normalization on paths.

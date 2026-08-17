@@ -257,15 +257,26 @@ processes are invisible — so `bash`-invoking computations on Linux go
 non-`valid` after the migration. That is the correct answer, not a
 regression, and W9 must not be graded as broken for producing it.
 
-**W9.1. The volatile reason-code split** (`core-engineer`, blocking on
-nothing, but blocked *by* the volatile engine fix landing first).
-ADR 0009's two reason codes, both schema enums, the fixtures in its
-§Consequences and Amendment 1 item 4, and the `--accept-likely-valid`
-floor. Until this lands, `--accept-likely-valid` accepts a never-probed
-volatile edge — a known open hole, not accepted behaviour. Sequence it
-after the ADR 0009 Amendment 2 engine fix (which is not a contract
-change) and before the ADR 0011 engine migration, since both touch
-`evaluate_edge`.
+**W9.1. The volatile reason-code split** (`core-engineer`) — **DONE,
+2026-08-17.** ADR 0009's two reason codes (`volatile-within-ttl-unprobed`,
+`dependency-changed-during-computation`), all three schema enums, the
+`--accept-likely-valid` floor, and the fixtures §Consequences named.
+The hole is closed: `--accept-likely-valid` no longer lifts a
+never-probed volatile edge to exit 0.
+
+Two notes for whoever reads this next:
+
+- The `volatile-unprobed-within-ttl` fixture §Consequences asks for was
+  not created. `volatile-external-dep` **is** that scenario — it
+  registers no probe — and it was only ever asserting the wrong code.
+  It now asserts `volatile-within-ttl-unprobed`. Adding a second,
+  near-identical fixture to satisfy the letter of the ADR would have
+  been coverage theatre.
+- `dependency-changed-during-computation` also forces the conflicting
+  edge's verdict to `Unknown`, which is a behaviour change beyond adding
+  a vocabulary entry: before this, the store recorded the conflict, the
+  engine logged a `graph.edge_conflict` diagnostic, and the certificate
+  still said `valid`.
 
 ### What it costs
 

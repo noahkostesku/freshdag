@@ -160,12 +160,14 @@ empty string `""` (not `null`, not omitted).
 | `probe-unknown` | edge | A probe ran and could not decide. |
 | `no-probe-available` | edge | No probe could be selected: none registered for the scheme, registration failed, arbitration tied, or the probe that recorded the fingerprint was removed (probe-contract §Anti-thrash Protocol, "Probe removal"). Distinct from `probe-unknown`, which asserts a probe executed. |
 | `trust-class-heuristic-caps-at-likely-valid` | edge | The edge matched, but at `heuristic` trust; invariant #8 forbids reporting it as `valid`. |
-| `trust-class-volatile-caps-at-likely-valid` | edge | The edge matched inside its TTL at `volatile` trust. |
+| `trust-class-volatile-caps-at-likely-valid` | edge | A probe **ran and matched** on a `volatile` edge inside its TTL. |
+| `volatile-within-ttl-unprobed` | edge | A `volatile` edge is inside a validated TTL and **no probe ran** — none registered for the scheme, arbitration tied, the probe was removed, or a probe ran and could not decide. Same verdict as the row above on strictly weaker evidence, which is why it is a separate code. `--accept-likely-valid` does not lift an artifact carrying this code to exit 0: the flag accepts a checked-but-heuristic result, and nothing checked this. |
 | `ttl-expired` | edge | A `volatile` edge's TTL elapsed without re-observation. |
 | `probe-trust-demoted` | edge | The signal backing the recorded trust class disappeared; the engine emitted a `probe.trust_demoted` diagnostic and forced re-observation. |
 | `coverage-deficit` | artifact | Effects occurred that no producer in `observation_coverage` claims to cover. |
 | `producer-missing-from-coverage` | artifact | An event in the stream names a producer absent from `observation_coverage`. |
 | `no-dependencies-observed` | artifact | The computation produced an artifact with zero observed dependencies. Absence of evidence is not evidence of freshness. |
+| `dependency-changed-during-computation` | edge | The same dependency was observed more than once within one computation with different fingerprints: the input changed while the agent was reading it. The recorded fingerprint is one of at least two and nothing says which the computation consumed, so the edge is `unknown` and the artifact can never be `valid`. |
 
 Three vocabularies in FreshDAG share spellings and must not be
 conflated: reason codes (this table), probe results

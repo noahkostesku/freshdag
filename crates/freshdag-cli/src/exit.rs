@@ -35,7 +35,7 @@
 //!
 //! [`ValidityStatus`]: freshdag_core::dependency::ValidityStatus
 
-use freshdag_core::dependency::ValidityStatus;
+use freshdag_core::dependency::{ReasonCode, ValidityReason, ValidityStatus};
 
 /// A `freshdag` process exit code.
 ///
@@ -100,6 +100,42 @@ impl Exit {
             ValidityStatus::Stale => Self::Stale,
         }
     }
+
+    /// [`Self::for_status`], with the floor `--accept-likely-valid`
+    /// cannot go under.
+    ///
+    /// The flag means "I accept a result that was **checked** but only
+    /// heuristically". It does not mean "I accept a result that was
+    /// never checked at all", and a `likely-valid` resting on
+    /// [`ReasonCode::VolatileWithinTtlUnprobed`] is the second thing: no
+    /// probe ran, and the only evidence is that whoever recorded the
+    /// dependency declared a lifetime which has not yet elapsed.
+    ///
+    /// Letting the flag lift that to `0` would make a producer's own
+    /// declaration a substitute for observation — invariant #7 with
+    /// extra steps, and reachable by any producer willing to write a
+    /// long `ttl_seconds`. So the floor holds even under the flag, and
+    /// the renderer says why.
+    ///
+    /// This does not weaken the flag anywhere else: a `likely-valid`
+    /// from a heuristic match, or from a volatile edge a probe actually
+    /// checked and agreed with, still reaches `0`. The distinction is
+    /// exactly the one ADR 0009's two reason codes exist to draw, which
+    /// is why the floor could not be written before they existed.
+    #[must_use]
+    pub fn for_status_with_reasons(
+        status: ValidityStatus,
+        reasons: &[ValidityReason],
+        accept_likely_valid: bool,
+    ) -> Self {
+        let unprobed = reasons
+            .iter()
+            .any(|r| matches!(r.reason, ReasonCode::VolatileWithinTtlUnprobed));
+        if accept_likely_valid && unprobed && matches!(status, ValidityStatus::LikelyValid) {
+            return Self::Unknown;
+        }
+        Self::for_status(status, accept_likely_valid)
+    }
 }
 
 #[cfg(test)]
@@ -136,6 +172,108 @@ mod tests {
             Exit::Unknown,
             "invariant #8: likely-valid must stay distinguishable from valid"
         );
+    }
+
+    fn reason(code: ReasonCode) -> ValidityReason {
+        ValidityReason {
+            dependency_key: "web.search(\"x\")".to_string(),
+            reason: code,
+            detail: None,
+        }
+    }
+
+    /// **The hole W9.1 closed.**
+    ///
+    /// `--accept-likely-valid` used to lift ANY `likely-valid` to exit
+    /// 0, including one resting on a volatile edge no probe ever
+    /// checked. The flag means "I accept a checked-but-heuristic
+    /// result"; that case was never checked at all, so the flag was
+    /// letting a producer's own `ttl_seconds` stand in for observation.
+    #[test]
+    fn accept_likely_valid_does_not_lift_a_never_probed_volatile_edge() {
+        let unprobed = [reason(ReasonCode::VolatileWithinTtlUnprobed)];
+        assert_eq!(
+            Exit::for_status_with_reasons(ValidityStatus::LikelyValid, &unprobed, true),
+            Exit::Unknown,
+            "a declared lifetime is a promise, not an observation"
+        );
+        // And without the flag it was already 2; the floor changes nothing there.
+        assert_eq!(
+            Exit::for_status_with_reasons(ValidityStatus::LikelyValid, &unprobed, false),
+            Exit::Unknown
+        );
+    }
+
+    /// The floor is narrow on purpose: it must not quietly disable the
+    /// flag for every `likely-valid`.
+    #[test]
+    fn accept_likely_valid_still_works_for_checked_results() {
+        for code in [
+            ReasonCode::TrustClassHeuristicCapsAtLikelyValid,
+            ReasonCode::TrustClassVolatileCapsAtLikelyValid,
+        ] {
+            assert_eq!(
+                Exit::for_status_with_reasons(ValidityStatus::LikelyValid, &[reason(code)], true),
+                Exit::Valid,
+                "{code}: a probe ran and agreed, so the flag still applies"
+            );
+        }
+    }
+
+    /// One unprobed edge poisons the artifact even beside checked ones.
+    ///
+    /// The status is a single aggregate over every edge; if any edge
+    /// went unchecked, the operator accepting `likely-valid` is
+    /// accepting that gap whether or not other edges were verified.
+    #[test]
+    fn one_unprobed_edge_is_enough_to_hold_the_floor() {
+        let mixed = [
+            reason(ReasonCode::TrustClassHeuristicCapsAtLikelyValid),
+            reason(ReasonCode::VolatileWithinTtlUnprobed),
+        ];
+        assert_eq!(
+            Exit::for_status_with_reasons(ValidityStatus::LikelyValid, &mixed, true),
+            Exit::Unknown
+        );
+    }
+
+    /// The floor never *upgrades* anything, and never fires outside
+    /// `likely-valid`.
+    #[test]
+    fn the_floor_only_ever_lowers_and_only_at_likely_valid() {
+        let unprobed = [reason(ReasonCode::VolatileWithinTtlUnprobed)];
+        for (status, expected) in [
+            (ValidityStatus::Valid, Exit::Valid),
+            (ValidityStatus::Stale, Exit::Stale),
+            (ValidityStatus::Unknown, Exit::Unknown),
+        ] {
+            for flag in [true, false] {
+                assert_eq!(
+                    Exit::for_status_with_reasons(status, &unprobed, flag),
+                    expected,
+                    "{status:?} with flag={flag} must be unaffected by the floor"
+                );
+            }
+        }
+    }
+
+    /// With no reasons at all, the floor is a pure pass-through.
+    #[test]
+    fn the_floor_agrees_with_for_status_when_no_reason_triggers_it() {
+        for status in [
+            ValidityStatus::Valid,
+            ValidityStatus::LikelyValid,
+            ValidityStatus::Stale,
+            ValidityStatus::Unknown,
+        ] {
+            for flag in [true, false] {
+                assert_eq!(
+                    Exit::for_status_with_reasons(status, &[], flag),
+                    Exit::for_status(status, flag),
+                    "{status:?} flag={flag}"
+                );
+            }
+        }
     }
 
     #[test]

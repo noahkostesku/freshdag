@@ -127,7 +127,11 @@ fn check_command(args: &CheckArgs) -> Exit {
         eprintln!("freshdag check: warning: {warning}");
     }
 
-    let exit = Exit::for_status(checked.certificate.status.value, args.accept_likely_valid);
+    let exit = Exit::for_status_with_reasons(
+        checked.certificate.status.value,
+        &checked.certificate.status.reasons,
+        args.accept_likely_valid,
+    );
 
     if args.json {
         match check::to_json(&checked.certificate) {

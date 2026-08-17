@@ -215,9 +215,21 @@ impl Engine {
         drop(ledger);
 
         // The store recorded that the same dependency was observed twice
-        // within one computation with different fingerprints. The engine
-        // has no reason code for it (adding one is a contract change), so
-        // it surfaces in the log rather than vanishing.
+        // within one computation with different fingerprints: the input
+        // changed while the agent was reading it.
+        //
+        // The recorded fingerprint is therefore not a statement about
+        // what the computation consumed — it is one of at least two, and
+        // nothing in the log says which the agent actually used. So the
+        // edge's verdict is forced to `Unknown` regardless of what the
+        // probe just said: a probe confirming the *recorded* fingerprint
+        // still matches proves nothing about the *other* observation.
+        //
+        // ADR 0009: an artifact with a mid-computation conflict can
+        // never be `Valid`. Until W9.1 this surfaced only as a
+        // `graph.edge_conflict` diagnostic, because no reason code
+        // existed and adding one is a contract change — so the conflict
+        // was visible in the log while the certificate reported `valid`.
         for conflict in &node.conflicts {
             emitted.push(self.diagnostic(
                 &computation,
@@ -230,6 +242,18 @@ impl Engine {
                     "conflicting_fingerprint": conflict.conflicting_fingerprint.to_string(),
                 }),
             ));
+
+            let key = conflict.dependency.to_string();
+            if let Some(edge) = edges.iter_mut().find(|e| e.dependency.key == key) {
+                edge.verdict = EdgeVerdict::Unknown;
+                edge.reason = Some((
+                    ReasonCode::DependencyChangedDuringComputation,
+                    Some(format!(
+                        "observed={} then={}",
+                        conflict.first_fingerprint, conflict.conflicting_fingerprint
+                    )),
+                ));
+            }
         }
 
         // --- artifact-scoped coverage reasons -------------------------
@@ -1024,19 +1048,39 @@ fn volatile_within_ttl_verdict(dep: &Dependency, probed: Option<&ProbeResult>) -
             verdict: EdgeVerdict::Drift,
             reason: Some((ReasonCode::Drift, None)),
         },
-        None | Some(ProbeResult::Match { .. } | ProbeResult::Unknown { .. }) => EdgeOutcome {
+        // A probe ran and agreed. The cap is a trust-class ceiling on a
+        // checked result.
+        Some(ProbeResult::Match { .. }) => EdgeOutcome {
             dependency: dep.clone(),
             verdict: EdgeVerdict::Match {
                 recorded_trust_class: TrustClass::Volatile,
                 observed_trust_class: TrustClass::Volatile,
                 observed_fp: dep.fingerprint.clone(),
             },
-            // Both arms carry `trust-class-volatile-caps-at-likely-valid`
-            // for now. ADR 0009 splits the unprobed case out as
-            // `volatile-within-ttl-unprobed`, which needs a `ReasonCode`
-            // variant and two schema enums — a separate contract-change
-            // PR (W9.1), deliberately not gating this fix.
             reason: caps_reason(TrustClass::Volatile),
+        },
+        // Nothing checked this edge: no probe registered for the scheme,
+        // arbitration tied, the probe was removed, or a probe ran and
+        // could not decide. The verdict is the same `LikelyValid`, but
+        // the evidence behind it is strictly weaker, and ADR 0009's
+        // whole point is that the certificate must say which of the two
+        // it is. Reporting `trust-class-volatile-caps-at-likely-valid`
+        // here tells a user reading `freshdag why` that a probe checked
+        // and agreed, when nothing checked it at all.
+        //
+        // `ProbeResult::Unknown` lands here rather than on edge
+        // `Unknown`: a probe that ran and could not decide has supplied
+        // no evidence, and the validated TTL is what survives. Mapping
+        // it to `Unknown` would restore the scheme-dependence ADR 0009
+        // Amendment 2 removed.
+        None | Some(ProbeResult::Unknown { .. }) => EdgeOutcome {
+            dependency: dep.clone(),
+            verdict: EdgeVerdict::Match {
+                recorded_trust_class: TrustClass::Volatile,
+                observed_trust_class: TrustClass::Volatile,
+                observed_fp: dep.fingerprint.clone(),
+            },
+            reason: Some((ReasonCode::VolatileWithinTtlUnprobed, None)),
         },
     }
 }
