@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use super::{
     envelope::DecodeError, CoverageManifest, EventKind, EventKindPattern, FsRead, FsReadKind,
-    FsWrite, FsWriteMode, Hash, HashAlgo, HashParseError, IrEvent, ProducerRole, ToolCompleted,
-    ToolInvoked, ToolKind, TypedPayload,
+    FsWrite, FsWriteMode, Hash, HashAlgo, HashParseError, IrEvent, PartialCoverage, PartialReason,
+    ProducerRole, ToolCompleted, ToolInvoked, ToolKind, TypedPayload, ALL_PARTIAL_REASONS,
 };
 
 fn sample_uuid() -> Uuid {
@@ -267,7 +267,10 @@ fn coverage_manifest_covers_and_partial() {
             let mut m = BTreeMap::new();
             m.insert(
                 "fs.read".to_string(),
-                "mmap-pessimistic; hashes at mmap time".to_string(),
+                PartialCoverage::new(
+                    PartialReason::OverApproximates,
+                    "mmap-pessimistic; hashes at mmap time",
+                ),
             );
             m
         },
@@ -285,6 +288,204 @@ fn coverage_manifest_covers_and_partial() {
         Some("mmap-pessimistic; hashes at mmap time")
     );
     assert_eq!(manifest.partial_note(EventKind::FsWrite), None);
+}
+
+// --------------------------------------------------------------------
+// ADR 0011: `partial` is a closed vocabulary, and the direction of the
+// error decides whether an obligation is discharged.
+// --------------------------------------------------------------------
+
+fn observer_with_partial(entries: &[(&str, PartialCoverage)]) -> CoverageManifest {
+    CoverageManifest {
+        producer: "freshdag-observer-test".to_string(),
+        version: "0.1.0".to_string(),
+        role: ProducerRole::Observer,
+        platforms: vec![],
+        emits: vec![
+            EventKindPattern::from("fs.read"),
+            EventKindPattern::from("fs.write"),
+        ],
+        partial: entries
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect(),
+        capabilities: BTreeMap::new(),
+        known_limitations: vec![],
+    }
+}
+
+#[test]
+fn partial_reason_serde_and_as_wire_str_agree() {
+    for reason in ALL_PARTIAL_REASONS {
+        let json = serde_json::to_string(&reason).unwrap();
+        assert_eq!(json, format!("\"{}\"", reason.as_wire_str()));
+        let back: PartialReason = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, reason);
+        assert_eq!(reason.to_string(), reason.as_wire_str());
+    }
+}
+
+#[test]
+fn partial_reason_rejects_codes_outside_the_vocabulary() {
+    // The vocabulary is closed: an unrecognized reason is unreadable,
+    // never guessed at.
+    assert!(serde_json::from_str::<PartialReason>("\"mostly-fine\"").is_err());
+    assert!(serde_json::from_str::<PartialReason>("\"OverApproximates\"").is_err());
+}
+
+#[test]
+fn only_over_approximation_discharges() {
+    assert!(PartialReason::OverApproximates.discharges());
+    assert!(!PartialReason::UnderApproximates.discharges());
+    assert!(!PartialReason::BlindInScope.discharges());
+}
+
+#[test]
+fn legacy_bare_string_partial_decodes_as_under_approximates() {
+    // The migration's whole safety argument: a pre-ADR-0011 manifest
+    // cannot state its direction of error, so it gets the conservative
+    // answer and stops discharging until its owner reclassifies it.
+    // Defaulting the other way would be a silent-wrong-answer generator
+    // on the invariant-#7 path.
+    let raw = json!({
+        "producer": "freshdag-observer-legacy",
+        "version": "0.1.0",
+        "role": "observer",
+        "emits": ["fs.read", "fs.write"],
+        "partial": { "fs.read": "cannot see reads inside subprocesses" }
+    });
+    let manifest: CoverageManifest = serde_json::from_value(raw).unwrap();
+
+    let entry = manifest.partial_coverage(EventKind::FsRead).unwrap();
+    assert_eq!(entry.reason, PartialReason::UnderApproximates);
+    assert_eq!(entry.note, "cannot see reads inside subprocesses");
+
+    // The note survives verbatim...
+    assert_eq!(
+        manifest.partial_note(EventKind::FsRead),
+        Some("cannot see reads inside subprocesses")
+    );
+    // ...and the producer still *covers* fs.read syntactically, but no
+    // longer discharges an obligation on it.
+    assert!(manifest.covers(EventKind::FsRead));
+    assert!(!manifest.discharges(EventKind::FsRead));
+}
+
+#[test]
+fn structured_partial_round_trips_and_normalizes_legacy_forward() {
+    let manifest = observer_with_partial(&[(
+        "fs.read",
+        PartialCoverage::new(
+            PartialReason::OverApproximates,
+            "mmap reads are pessimistic",
+        ),
+    )]);
+    let s = serde_json::to_string(&manifest).unwrap();
+    assert!(s.contains("\"reason\":\"over-approximates\""));
+    let back: CoverageManifest = serde_json::from_str(&s).unwrap();
+    assert_eq!(back, manifest);
+
+    // A legacy manifest re-serializes in the structured form, so the
+    // wire shape converges forward rather than staying ambiguous.
+    let legacy: CoverageManifest = serde_json::from_value(json!({
+        "producer": "p", "version": "0.1.0", "role": "observer",
+        "emits": ["fs.read"], "partial": { "fs.read": "prose" }
+    }))
+    .unwrap();
+    let s = serde_json::to_string(&legacy).unwrap();
+    assert!(s.contains("\"reason\":\"under-approximates\""));
+    let back: CoverageManifest = serde_json::from_str(&s).unwrap();
+    assert_eq!(back, legacy);
+}
+
+#[test]
+fn partial_object_without_reason_fails_to_deserialize() {
+    // There is no default in the object form. A producer that writes
+    // `{note: …}` has a bug, and a bug on this path must be loud rather
+    // than guessed at in either direction.
+    let err = serde_json::from_value::<CoverageManifest>(json!({
+        "producer": "p", "version": "0.1.0", "role": "observer",
+        "emits": ["fs.read"], "partial": { "fs.read": { "note": "prose" } }
+    }))
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("reason"),
+        "error should name the missing field: {err}"
+    );
+
+    // `note` alone is optional when `reason` is present.
+    let ok: CoverageManifest = serde_json::from_value(json!({
+        "producer": "p", "version": "0.1.0", "role": "observer",
+        "emits": ["fs.read"], "partial": { "fs.read": { "reason": "blind-in-scope" } }
+    }))
+    .unwrap();
+    assert_eq!(
+        ok.partial_coverage(EventKind::FsRead).unwrap().reason,
+        PartialReason::BlindInScope
+    );
+    assert_eq!(ok.partial_note(EventKind::FsRead), Some(""));
+}
+
+#[test]
+fn discharges_requires_coverage_and_a_safe_direction() {
+    // Over-approximation is the only direction that discharges.
+    let over = observer_with_partial(&[(
+        "fs.read",
+        PartialCoverage::new(PartialReason::OverApproximates, "pessimistic"),
+    )]);
+    assert!(over.discharges(EventKind::FsRead));
+
+    for bad in [
+        PartialReason::UnderApproximates,
+        PartialReason::BlindInScope,
+    ] {
+        let m = observer_with_partial(&[("fs.read", PartialCoverage::new(bad, "n"))]);
+        assert!(m.covers(EventKind::FsRead), "{bad} should still cover");
+        assert!(!m.discharges(EventKind::FsRead), "{bad} must not discharge");
+    }
+
+    // No partial declaration at all is a full-fidelity claim.
+    let clean = observer_with_partial(&[]);
+    assert!(clean.discharges(EventKind::FsRead));
+
+    // Discharge requires coverage in the first place.
+    assert!(!clean.discharges(EventKind::NetConnect));
+}
+
+#[test]
+fn a_specific_partial_entry_cannot_override_a_broader_blindness() {
+    // The Claude adapter's real shape: `fs.*` admits total blindness
+    // inside subprocesses while `fs.read` describes what it does see.
+    // Letting the more specific key win would let any producer annotate
+    // its way out of its own broadest admission.
+    let m = observer_with_partial(&[
+        (
+            "fs.*",
+            PartialCoverage::new(PartialReason::BlindInScope, "nothing inside subprocesses"),
+        ),
+        (
+            "fs.read",
+            PartialCoverage::new(PartialReason::OverApproximates, "pessimistic where visible"),
+        ),
+    ]);
+    assert!(m.covers(EventKind::FsRead));
+    assert!(!m.discharges(EventKind::FsRead));
+
+    // Presentation still prefers the most specific note.
+    assert_eq!(
+        m.partial_note(EventKind::FsRead),
+        Some("pessimistic where visible")
+    );
+}
+
+#[test]
+fn wildcard_partial_applies_to_every_matching_kind() {
+    let m = observer_with_partial(&[(
+        "fs.*",
+        PartialCoverage::new(PartialReason::UnderApproximates, "lossy"),
+    )]);
+    assert!(!m.discharges(EventKind::FsRead));
+    assert!(!m.discharges(EventKind::FsWrite));
 }
 
 #[test]
