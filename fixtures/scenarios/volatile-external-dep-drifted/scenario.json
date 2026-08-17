@@ -1,0 +1,122 @@
+{
+  "scenario": "volatile-external-dep-drifted",
+  "schema": "freshdag.scenario/v0.1",
+  "description": "A volatile dependency inside its TTL whose probe observes drift. The certificate MUST be stale, not likely-valid. This is the shape freshdag-probes' https.rs actually produces: Cache-Control: no-store classifies the response volatile while the ETag remains comparable, so a no-store resource whose validator moved is observably Drift at a volatile trust class.",
+  "input_observations": [
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000301",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile-drift",
+      "computation_id": "comp:9c1d4f2a7b6e0d3c8a5f1e2b7d4c6a9f0e3b8d5c2a7f4e1b6d9c0a3f8e5b2d7c",
+      "ts": "2026-08-15T14:02:13.000000000Z",
+      "kind": "computation.started",
+      "payload": {
+        "recipe_id": "pricing-watch",
+        "recipe_hash": "blake3:1cc4c8682b09910b587ecc7df112f5d58734bc729b232bbf23984048aaf8eabc"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000302",
+      "producer": "freshdag-probe-https",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile-drift",
+      "computation_id": "comp:9c1d4f2a7b6e0d3c8a5f1e2b7d4c6a9f0e3b8d5c2a7f4e1b6d9c0a3f8e5b2d7c",
+      "ts": "2026-08-15T14:02:14.000000000Z",
+      "kind": "probe.checked",
+      "payload": {
+        "scheme": "https",
+        "key": "churn.example.test/pricing",
+        "observed_fingerprint": "etag:\"v1\"",
+        "trust_class": "volatile",
+        "ttl_seconds": 3600,
+        "result": "match"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000303",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile-drift",
+      "computation_id": "comp:9c1d4f2a7b6e0d3c8a5f1e2b7d4c6a9f0e3b8d5c2a7f4e1b6d9c0a3f8e5b2d7c",
+      "ts": "2026-08-15T14:02:15.000000000Z",
+      "kind": "fs.write",
+      "payload": {
+        "path": "/repo/pricing.md",
+        "size": 300,
+        "mode": "truncate",
+        "hash": "blake3:7c2b9e4a1d6f3c8b5a0e7d2c9f4b1a6e3d8c5b0a7f2e9d4c1b6a3f8e5d0c7b2a"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000304",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile-drift",
+      "computation_id": "comp:9c1d4f2a7b6e0d3c8a5f1e2b7d4c6a9f0e3b8d5c2a7f4e1b6d9c0a3f8e5b2d7c",
+      "ts": "2026-08-15T14:02:16.000000000Z",
+      "kind": "artifact.produced",
+      "payload": {
+        "artifact_id": "blake3:7c2b9e4a1d6f3c8b5a0e7d2c9f4b1a6e3d8c5b0a7f2e9d4c1b6a3f8e5d0c7b2a",
+        "path": "/repo/pricing.md",
+        "content_hash": "blake3:7c2b9e4a1d6f3c8b5a0e7d2c9f4b1a6e3d8c5b0a7f2e9d4c1b6a3f8e5d0c7b2a",
+        "kind": "text/markdown",
+        "size": 300,
+        "produced_by": "comp:9c1d4f2a7b6e0d3c8a5f1e2b7d4c6a9f0e3b8d5c2a7f4e1b6d9c0a3f8e5b2d7c",
+        "comparator": "exact"
+      }
+    },
+    {
+      "event_id": "018f5b52-4b8b-7a1a-9c2f-000000000305",
+      "producer": "freshdag-adapter-claude",
+      "producer_version": "0.1.0",
+      "session_id": "sess-volatile-drift",
+      "computation_id": "comp:9c1d4f2a7b6e0d3c8a5f1e2b7d4c6a9f0e3b8d5c2a7f4e1b6d9c0a3f8e5b2d7c",
+      "ts": "2026-08-15T14:02:17.000000000Z",
+      "kind": "computation.ended",
+      "payload": {
+        "status": "ok"
+      }
+    }
+  ],
+  "input_probes": {
+    "https://churn.example.test/pricing": {
+      "trust_class": "volatile",
+      "no_change_yields": "match",
+      "after_mutation_yields": "drift",
+      "observed_fingerprint": "etag:\"v1\"",
+      "mutated_fingerprint": "etag:\"v2\""
+    }
+  },
+  "expected": {
+    "dependency_graph": [
+      {
+        "dependency_key": "https://churn.example.test/pricing",
+        "scheme": "https",
+        "trust_class": "volatile"
+      }
+    ],
+    "certificate_status": {
+      "value": "likely-valid",
+      "reason_codes": [
+        "trust-class-volatile-caps-at-likely-valid"
+      ]
+    },
+    "invalidation": {
+      "before_mutation": "likely-valid",
+      "after_mutation": "stale",
+      "after_mutation_reason_codes": [
+        "drift"
+      ],
+      "mutated_dependency_keys": [
+        "https://churn.example.test/pricing"
+      ]
+    }
+  },
+  "notes": [
+    "added by ADR 0009 Amendment 2 (2026-08-16), which rules that a volatile dependency can reach stale and only via a probe's Drift",
+    "The TTL is never advanced here: the whole point is that the window is still open and the probe still decided the edge. The sibling fixtures volatile-external-dep and volatile-external-dep-probed cover the TTL-expiry path.",
+    "Trust classes bound how strongly FreshDAG may assert something is unchanged; they say nothing about its ability to observe that something changed. Reporting likely-valid on an input that demonstrably moved would be invariant #7's harm arriving from the opposite direction, and invariant #15 settles it: correctness beats cache hit rate.",
+    "The first implementation of the ADR 0009 Amendment 1 code motion decided volatile edges in full before arbitration, so this scenario would have reported likely-valid -- strictly worse drift detection than the defect it repaired. This fixture exists to make that regression impossible to reintroduce silently."
+  ]
+}

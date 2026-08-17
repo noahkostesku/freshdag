@@ -2,14 +2,20 @@
 //!
 //! The dispatch order for one dependency edge, and why it is that order:
 //!
-//! 1. **Trust class `volatile` first, in full.** ARCHITECTURE §7 defines
-//!    such an edge entirely by its declared TTL — inside the window it
-//!    is `Match` capped at `LikelyValid`, outside it (or with no usable
-//!    declaration) `Unknown` with [`ReasonCode::TtlExpired`]. §7's
-//!    amendment requires this be a *positive* branch keyed on the trust
-//!    class and evaluated before probe arbitration, so that registering
-//!    an unrelated probe for the scheme cannot silently change the
-//!    verdict. No probe is consulted for a volatile edge.
+//! 1. **The `volatile` TTL gate, first and positive.** If the trust
+//!    class is `volatile` and the declared TTL is absent,
+//!    unrepresentable, longer than `max_volatile_ttl`, measured from a
+//!    future `observed_at`, or elapsed, the edge is `Unknown` with
+//!    [`ReasonCode::TtlExpired`] and no probe is consulted. §7 requires
+//!    this be a *positive* branch keyed on the trust class and evaluated
+//!    before arbitration, so that registering an unrelated probe for the
+//!    scheme cannot silently change the verdict. Every outcome here is a
+//!    function of the recorded dependency alone.
+//!
+//!    **Passing the gate does not decide the edge** — §7 disambiguates
+//!    "before probe arbitration" as scoping the gate, not the verdict.
+//!    Steps 2-4 then run normally, and the verdict is resolved by
+//!    [`volatile_within_ttl_verdict`].
 //! 2. **Probe removal.** If the probe that last answered for this key is
 //!    no longer registered, the edge is `Unknown` with
 //!    [`ReasonCode::NoProbeAvailable`]. The engine does NOT fall through
@@ -322,39 +328,30 @@ impl Engine {
             reason: Some((code, Some(detail))),
         };
 
-        // 1. Trust class `volatile`, decided in full before any probe is
-        //    considered (ARCHITECTURE §7 and its amendment).
+        // 1. The TTL gate: positive, keyed on trust class, before probe
+        //    removal and arbitration (ARCHITECTURE §7 step 1).
         //
-        //    A `volatile` dependency is by definition one for which no
-        //    trustworthy freshness signal exists, so the only evidence
-        //    this edge has is the producer's *declared TTL*. Inside the
-        //    window the edge is `Match`, capped at LikelyValid; outside
-        //    it — or with no usable declaration — it is `Unknown`.
-        //
-        //    §7's amendment requires this be a positive branch keyed on
-        //    the trust class, evaluated before probe arbitration, and
-        //    never a fallback in an arbitration-failure path. It used to
-        //    live in step 3's `Err(no_probe)` arm, where registering an
-        //    unrelated probe for the scheme silently flipped the
-        //    verdict: two edges at the same trust class, inside the same
-        //    TTL, over the same absent resource reported `likely-valid`
-        //    for `web.search://…` and `unknown` for `file:///…` on the
-        //    strength of the scheme alone.
+        //    "Before probe arbitration" scopes *this gate*, not the
+        //    verdict — §7 disambiguates that explicitly, because the
+        //    first implementation read it the other way and stopped
+        //    consulting probes on volatile edges at all. The gate
+        //    short-circuits only *downward*: every outcome here is
+        //    `Unknown`, and every one of them is a function of the
+        //    recorded dependency alone, which is what removes the
+        //    scheme-dependence the gate was added for. A dependency's
+        //    verdict must not turn on which schemes happen to have
+        //    probes installed.
         //
         //    A declared TTL is evidence only where it is *bounded* and
-        //    its timestamp is *real* (ADR 0009, Amendment). Three
-        //    guards, in order: the declaration must be representable,
-        //    it must be within `max_volatile_ttl`, and the timestamp it
-        //    is measured from must not be in the future. Each failure
-        //    is `Unknown` / `TtlExpired` — the class is bounded, never
-        //    discarded, so `volatile` stays usable for the dependencies
-        //    (`time.now()`) that no probe can ever answer for.
-        //
-        //    Nothing here can reach `Valid`. The recorded class stays
-        //    `Volatile`, which `Validity::aggregate` caps at LikelyValid
-        //    and `Certificate::check_invariants` refuses outright at
-        //    `Valid`.
-        if matches!(dep.trust_class, TrustClass::Volatile) {
+        //    its timestamp is *real* (ADR 0009, Amendment 1). Four
+        //    guards: the declaration must exist, be representable, be
+        //    within `max_volatile_ttl`, and be measured from an
+        //    `observed_at` that is not in the future — then it must not
+        //    have elapsed. The class is bounded, never discarded, so
+        //    `volatile` stays usable for the dependencies (`time.now()`)
+        //    that no probe can ever answer for.
+        let volatile_within_ttl = matches!(dep.trust_class, TrustClass::Volatile);
+        if volatile_within_ttl {
             let Some(secs) = dep.ttl_seconds else {
                 return unknown(ReasonCode::TtlExpired, "ttl_seconds=absent".to_string());
             };
@@ -394,18 +391,10 @@ impl Engine {
             if now > expires_at {
                 return unknown(ReasonCode::TtlExpired, format!("ttl_seconds={secs}"));
             }
-            return EdgeOutcome {
-                dependency: dep.clone(),
-                verdict: EdgeVerdict::Match {
-                    recorded_trust_class: TrustClass::Volatile,
-                    observed_trust_class: TrustClass::Volatile,
-                    observed_fp: dep.fingerprint.clone(),
-                },
-                reason: Some((
-                    ReasonCode::TrustClassVolatileCapsAtLikelyValid,
-                    Some("within-declared-ttl".to_string()),
-                )),
-            };
+            // Passing the gate does NOT decide the edge (§7 step 2). It
+            // establishes only that the declared lifetime is bounded,
+            // real, and open. Fall through to removal, arbitration and
+            // dispatch like every other class.
         }
 
         // 2. Probe removal. Never fall through to another probe.
@@ -424,6 +413,9 @@ impl Engine {
                         "previous_probe": previous.as_str(),
                     }),
                 ));
+                if volatile_within_ttl {
+                    return volatile_within_ttl_verdict(dep, None);
+                }
                 return unknown(ReasonCode::NoProbeAvailable, reason.detail());
             }
         }
@@ -453,9 +445,9 @@ impl Engine {
                         }),
                     ));
                 }
-                // No `volatile` special case here, deliberately: step 1
-                // already decided every volatile edge, so "no probe" at
-                // this point means exactly what it says.
+                if volatile_within_ttl {
+                    return volatile_within_ttl_verdict(dep, None);
+                }
                 return unknown(ReasonCode::NoProbeAvailable, no_probe.detail());
             }
         };
@@ -464,76 +456,89 @@ impl Engine {
         let ttl_hint = dep.ttl_seconds.map(std::time::Duration::from_secs);
         let result = selected.probe.check(&dep.key, &dep.fingerprint, ttl_hint);
 
+        // 4a. Bookkeeping, identical for every trust class. What the
+        //     probe said reaches the log and the ledger regardless of
+        //     how the verdict is then computed.
+        //
+        //     The `probe.checked` payload carries *inputs only* (ADR
+        //     0007, Amendment P1): `trust_class` is the class the store
+        //     recorded on the dependency, `observed_trust_class` is what
+        //     the probe saw this time. Neither is derived. Writing the
+        //     ledger's *adopted* class here — which this code used to
+        //     do, with a comment claiming the opposite — is wrong twice
+        //     over. It is a silent escalation across a process boundary:
+        //     after N=2 the adopted class is the escalated one, so a
+        //     replay of the log yields `Valid` where the store recorded
+        //     `Heuristic` (invariants #7 and #8). And because ADR 0007
+        //     makes the ledger a *fold over* `probe.checked`, writing
+        //     the fold's own output into the events being folded makes
+        //     the projection non-idempotent — derived state whose value
+        //     depends on how many times it has been derived is not
+        //     reconstructable in the sense invariant #5 means.
+        //
+        //     Adoption stays auditable: it is reconstructable from the
+        //     `observed_trust_class` sequence, which is what the
+        //     anti-thrash protocol was always defined over, and the
+        //     transitions surface as `probe.trust_escalated` and
+        //     `probe.trust_demoted` diagnostics.
+        emitted.push(self.probe_checked_for(computation, now, sequence, dep, &result));
+        let transition = match &result {
+            ProbeResult::Match {
+                observed_trust_class,
+                ..
+            } => Some(ledger.observe(
+                &dep.key,
+                &selected.identity,
+                dep.trust_class,
+                *observed_trust_class,
+                now,
+            )),
+            // A probe that ran owns the key for probe-removal purposes,
+            // whatever it said (probe-contract §Anti-thrash, "Probe
+            // removal" — never fall through to another probe). Only
+            // `Match` carries an observed class for the ledger to fold.
+            ProbeResult::Drift { .. } | ProbeResult::Unknown { .. } => {
+                ledger.note_probe(&dep.key, &selected.identity);
+                None
+            }
+        };
+        if let Some(TrustTransition::Escalated { from, to }) = transition {
+            emitted.push(self.diagnostic(
+                computation,
+                now,
+                sequence,
+                "probe.trust_escalated",
+                serde_json::json!({
+                    "dependency_key": dep.key,
+                    "probe_identity": selected.identity.as_str(),
+                    "from_trust_class": trust_wire(from),
+                    "to_trust_class": trust_wire(to),
+                }),
+            ));
+        }
+        if let Some(TrustTransition::Demoted { from, to }) = transition {
+            emitted.push(self.trust_demoted(
+                computation,
+                now,
+                sequence,
+                dep,
+                &selected.identity,
+                from,
+                to,
+            ));
+        }
+
+        // 4b. Verdict.
+        if volatile_within_ttl {
+            return volatile_within_ttl_verdict(dep, Some(&result));
+        }
+
         match result {
             ProbeResult::Match {
                 observed_fp,
                 observed_trust_class,
             } => {
-                let transition = ledger.observe(
-                    &dep.key,
-                    &selected.identity,
-                    dep.trust_class,
-                    observed_trust_class,
-                    now,
-                );
-                // The payload carries *inputs only* (ADR 0007, Amendment
-                // P1): `trust_class` is the class the store recorded on
-                // the dependency, `observed_trust_class` is what the
-                // probe saw this time. Neither is derived.
-                //
-                // Writing the ledger's *adopted* class here — which this
-                // code used to do, with a comment claiming the opposite
-                // — is wrong twice over. It is a silent escalation
-                // across a process boundary: after N=2 the adopted class
-                // is the escalated one, so a replay of the log yields
-                // `Valid` where the store recorded `Heuristic`
-                // (invariants #7 and #8). And because ADR 0007 makes the
-                // ledger a *fold over* `probe.checked`, writing the
-                // fold's own output into the events being folded makes
-                // the projection non-idempotent — derived state whose
-                // value depends on how many times it has been derived is
-                // not reconstructable in the sense invariant #5 means.
-                //
-                // Adoption stays auditable: it is reconstructable from
-                // the `observed_trust_class` sequence, which is what the
-                // anti-thrash protocol was always defined over, and the
-                // transitions themselves surface as `probe.trust_demoted`
-                // and `probe.trust_escalated` diagnostics below.
-                emitted.push(self.probe_checked(
-                    computation,
-                    now,
-                    sequence,
-                    dep,
-                    "match",
-                    Some(&observed_fp.to_string()),
-                    dep.trust_class,
-                    observed_trust_class,
-                    None,
-                ));
-                if let TrustTransition::Escalated { from, to } = transition {
-                    emitted.push(self.diagnostic(
-                        computation,
-                        now,
-                        sequence,
-                        "probe.trust_escalated",
-                        serde_json::json!({
-                            "dependency_key": dep.key,
-                            "probe_identity": selected.identity.as_str(),
-                            "from_trust_class": trust_wire(from),
-                            "to_trust_class": trust_wire(to),
-                        }),
-                    ));
-                }
-                if let TrustTransition::Demoted { from, to } = transition {
-                    emitted.push(self.trust_demoted(
-                        computation,
-                        now,
-                        sequence,
-                        dep,
-                        &selected.identity,
-                        from,
-                        to,
-                    ));
+                if let Some(TrustTransition::Demoted { from, to }) = transition {
                     return unknown(
                         ReasonCode::ProbeTrustDemoted,
                         format!("from={} to={}", trust_wire(from), trust_wire(to)),
@@ -554,69 +559,31 @@ impl Engine {
                     reason: caps_reason(dep.trust_class),
                 }
             }
-            ProbeResult::Drift {
-                observed_fp,
-                observed_trust_class,
-            } => {
-                ledger.note_probe(&dep.key, &selected.identity);
-                emitted.push(self.probe_checked(
-                    computation,
-                    now,
-                    sequence,
-                    dep,
-                    "drift",
-                    Some(&observed_fp.to_string()),
-                    dep.trust_class,
-                    observed_trust_class,
-                    None,
-                ));
-                EdgeOutcome {
-                    dependency: dep.clone(),
-                    verdict: EdgeVerdict::Drift,
-                    reason: Some((ReasonCode::Drift, None)),
-                }
-            }
-            ProbeResult::Unknown { reason, retryable } => {
-                // ADR 0010: `Unknown` maps to `ProbeUnknown` regardless
-                // of `retryable`, and never demotes.
-                //
-                // `retryable` answers a scheduling question; demotion
-                // answers an evidentiary one. Treating the first as the
-                // second told a user who deleted a dependency that the
-                // reason was `probe-trust-demoted` — a true detail under
-                // a false code, since the trust class of nothing was
-                // demoted and a file is gone. `FileProbe` returns
-                // `Unknown { retryable: false }` for a missing file, a
-                // malformed recorded fingerprint, and a fingerprint kind
-                // it cannot verify; none of those observed a weaker
-                // validator. The one case that does — an endpoint that
-                // stopped serving `ETag` — arrives as `Match`/`Drift`
-                // with a lower `observed_trust_class` and is folded by
-                // `TrustLedger::observe`.
-                //
-                // `retryable` still reaches the log below, where the
-                // scheduler wants it. Certificates explain; the log
-                // schedules.
-                emitted.push(self.probe_checked(
-                    computation,
-                    now,
-                    sequence,
-                    dep,
-                    "unknown",
-                    None,
-                    dep.trust_class,
-                    dep.trust_class,
-                    Some(retryable),
-                ));
-                // This probe answered for this key, whatever it said, so
-                // it owns the key for probe-removal purposes. Recording
-                // it on one arm and not the other was an artifact of
-                // routing `retryable` through the ledger; the safe and
-                // symmetric reading is that a probe that ran is the
-                // probe responsible (probe-contract §Anti-thrash,
-                // "Probe removal" — never fall through to another
-                // probe).
-                ledger.note_probe(&dep.key, &selected.identity);
+            ProbeResult::Drift { .. } => EdgeOutcome {
+                dependency: dep.clone(),
+                verdict: EdgeVerdict::Drift,
+                reason: Some((ReasonCode::Drift, None)),
+            },
+            // ADR 0010: `Unknown` maps to `ProbeUnknown` regardless of
+            // `retryable`, and never demotes.
+            //
+            // `retryable` answers a scheduling question; demotion
+            // answers an evidentiary one. Treating the first as the
+            // second told a user who deleted a dependency that the
+            // reason was `probe-trust-demoted` — a true detail under a
+            // false code, since the trust class of nothing was demoted
+            // and a file is gone. `FileProbe` returns `Unknown {
+            // retryable: false }` for a missing file, a malformed
+            // recorded fingerprint, and a fingerprint kind it cannot
+            // verify; none of those observed a weaker validator. The one
+            // case that does — an endpoint that stopped serving `ETag` —
+            // arrives as `Match`/`Drift` with a lower
+            // `observed_trust_class` and is folded by
+            // `TrustLedger::observe` above.
+            //
+            // `retryable` still reaches the log, where the scheduler
+            // wants it. Certificates explain; the log schedules.
+            ProbeResult::Unknown { reason, .. } => {
                 unknown(ReasonCode::ProbeUnknown, sanitize_detail(&reason))
             }
         }
@@ -749,6 +716,63 @@ impl Engine {
     }
 
     // ------------------------------------------------- event emission
+
+    /// The `probe.checked` event for a probe result, whatever it said.
+    ///
+    /// One site, so the three results cannot drift apart in what they
+    /// record — `retryable` is REQUIRED on `unknown` and forbidden
+    /// elsewhere (execution-ir.md), and `trust_class` is the recorded
+    /// class on all three (ADR 0007, Amendment P1).
+    fn probe_checked_for(
+        &self,
+        computation: &ComputationId,
+        now: OffsetDateTime,
+        sequence: &mut u16,
+        dep: &Dependency,
+        result: &ProbeResult,
+    ) -> IrEvent {
+        match result {
+            ProbeResult::Match {
+                observed_fp,
+                observed_trust_class,
+            } => self.probe_checked(
+                computation,
+                now,
+                sequence,
+                dep,
+                "match",
+                Some(&observed_fp.to_string()),
+                dep.trust_class,
+                *observed_trust_class,
+                None,
+            ),
+            ProbeResult::Drift {
+                observed_fp,
+                observed_trust_class,
+            } => self.probe_checked(
+                computation,
+                now,
+                sequence,
+                dep,
+                "drift",
+                Some(&observed_fp.to_string()),
+                dep.trust_class,
+                *observed_trust_class,
+                None,
+            ),
+            ProbeResult::Unknown { retryable, .. } => self.probe_checked(
+                computation,
+                now,
+                sequence,
+                dep,
+                "unknown",
+                None,
+                dep.trust_class,
+                dep.trust_class,
+                Some(*retryable),
+            ),
+        }
+    }
 
     #[allow(clippy::too_many_arguments, clippy::unused_self)]
     fn probe_checked(
@@ -937,13 +961,84 @@ fn trust_wire(class: TrustClass) -> &'static str {
     }
 }
 
+/// The verdict for a `volatile` edge that passed the TTL gate
+/// (ARCHITECTURE §7 step 3).
+///
+/// **Total in the probe outcome, and that totality is the point.**
+/// `None` covers every path that produced no probe result — no probe
+/// registered for the scheme, an arbitration tie, a probe uninstalled
+/// since it last answered — and the three `Some` arms cover the rest.
+/// Written as one exhaustive match rather than as guards sprinkled
+/// through `evaluate_edge`, because the defect this replaces was
+/// precisely a reader deciding that one of these paths deserved
+/// different treatment.
+///
+/// The invariant it expresses: **inside a validated TTL, a probe may
+/// only make a `volatile` verdict stricter.** The baseline is
+/// `LikelyValid`, licensed by the declared TTL that step 1 already
+/// validated; a probe result can lower it to `Stale` and can do nothing
+/// else. It cannot raise it — the recorded class stays `Volatile`, which
+/// `Validity::aggregate` caps at `LikelyValid` and
+/// `Certificate::check_invariants` refuses outright at `Valid`. And it
+/// cannot lower it to `Unknown`.
+///
+/// That last clause is the one worth guarding. Probe `Unknown` lands
+/// here alongside "no probe registered" because `Unknown` from a probe
+/// is the *absence* of evidence, and the validated TTL is the evidence
+/// that survives in both cases. Mapping it to `EdgeVerdict::Unknown`
+/// would restore the verifier's original reproduction verbatim:
+/// `web.search://` unprobed at `likely-valid` and `file:///`
+/// probed-and-undecided at `unknown`, same trust class, same TTL, same
+/// absent resource, differing only in which scheme happens to have a
+/// probe installed.
+///
+/// `Drift` is different in kind. A trust class bounds how strongly
+/// FreshDAG may assert something is *unchanged*; it says nothing about
+/// its ability to observe that something *changed*. `volatile` means
+/// "no trustworthy signal that this is the same", not "no signal at
+/// all" — the `https://` probe classifies `Cache-Control: no-store` as
+/// `volatile` while still holding a comparable `ETag` or content hash,
+/// so a `no-store` resource that demonstrably moved is observably
+/// `Drift`. Discarding that to preserve `LikelyValid` would report a
+/// verdict stronger than the evidence supports, which is invariant #7's
+/// harm arriving from the opposite direction, and invariant #15 settles
+/// it: correctness beats cache hit rate.
+///
+/// Known remainder, deliberately open (ARCHITECTURE §7, `BUILD_PLAN`
+/// §7): a probe that reported `Drift` and is then uninstalled lands on
+/// the `None` arm, so the edge returns to `LikelyValid`. Consuming prior
+/// drift observations from the log is a store-projection question, not
+/// an evaluation-order one.
+fn volatile_within_ttl_verdict(dep: &Dependency, probed: Option<&ProbeResult>) -> EdgeOutcome {
+    match probed {
+        Some(ProbeResult::Drift { .. }) => EdgeOutcome {
+            dependency: dep.clone(),
+            verdict: EdgeVerdict::Drift,
+            reason: Some((ReasonCode::Drift, None)),
+        },
+        None | Some(ProbeResult::Match { .. } | ProbeResult::Unknown { .. }) => EdgeOutcome {
+            dependency: dep.clone(),
+            verdict: EdgeVerdict::Match {
+                recorded_trust_class: TrustClass::Volatile,
+                observed_trust_class: TrustClass::Volatile,
+                observed_fp: dep.fingerprint.clone(),
+            },
+            // Both arms carry `trust-class-volatile-caps-at-likely-valid`
+            // for now. ADR 0009 splits the unprobed case out as
+            // `volatile-within-ttl-unprobed`, which needs a `ReasonCode`
+            // variant and two schema enums — a separate contract-change
+            // PR (W9.1), deliberately not gating this fix.
+            reason: caps_reason(TrustClass::Volatile),
+        },
+    }
+}
+
 /// The edge-scoped reason a *matching* edge contributes, if any.
 ///
 /// This mirrors `Validity::aggregate`'s own table; the engine's
-/// self-audit in `seal` fails loudly if the two ever disagree. The
-/// `Volatile` arm is unreachable from `evaluate_edge` — step 1 decides
-/// every volatile edge before dispatch — and is kept because the table
-/// it mirrors is total.
+/// self-audit in `seal` fails loudly if the two ever disagree. Every arm
+/// has a producer: the `Volatile` one is reached through
+/// [`volatile_within_ttl_verdict`].
 fn caps_reason(recorded: TrustClass) -> Option<(ReasonCode, Option<String>)> {
     match recorded {
         TrustClass::Heuristic => Some((ReasonCode::TrustClassHeuristicCapsAtLikelyValid, None)),

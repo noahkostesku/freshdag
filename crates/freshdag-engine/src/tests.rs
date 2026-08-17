@@ -606,66 +606,304 @@ fn skew_inside_the_tolerance_is_still_evidence() {
     );
 }
 
-/// The regression D2 is: the volatile-inside-TTL rule must be a positive
-/// branch keyed on the trust class, not a fallback in the
-/// arbitration-failure path.
+/// ARCHITECTURE §7 step 3, tested as the total function it is: inside a
+/// validated TTL, every probe outcome *except* `Drift` produces the same
+/// verdict as no probe at all.
 ///
-/// While it lived in `Err(no_probe)`, two edges at the same trust class,
-/// inside the same TTL, over the same absent resource disagreed on the
-/// strength of their scheme alone — `web.search://…` (nothing
-/// registered) reported `likely-valid` and `file:///…` (a probe
-/// registered, answering `Unknown` because the file is gone) reported
-/// `unknown`. Registering an unrelated probe must not move the verdict.
+/// The defect D2 names is that the rule lived in arbitration's
+/// `Err(no_probe)` arm, so two edges at the same trust class, inside the
+/// same TTL, over the same absent resource disagreed on the strength of
+/// their scheme alone — `web.search://…` with nothing registered at
+/// `likely-valid`, `file:///…` with a probe answering `Unknown` at
+/// `unknown`. The architect called out the way to reintroduce it:
+/// mapping probe `Unknown` to edge `Unknown`. `Unknown` from a probe is
+/// the *absence* of evidence, and the validated TTL is the evidence that
+/// survives in both cases, so it lands here with the rest.
+///
+/// Enumerated rather than sampled: totality is the property that
+/// forecloses the next misreading, so every non-`Drift` path through
+/// `evaluate_edge` — no probe registered, arbitration tie, probe
+/// uninstalled, `Match`, and `Unknown` at both values of `retryable` —
+/// is asserted to agree.
 #[test]
-fn a_volatile_edge_inside_ttl_ignores_whether_a_probe_is_registered() {
+fn every_non_drift_outcome_gives_a_volatile_edge_the_same_verdict() {
     let fingerprint = format!("blake3:{}", blake3_of("volatile"));
-    let run = |register: bool| {
-        let fixture = Fixture::new("volatile-probe-independence").with_probe_edge(
-            "https",
-            "acme.com/pricing",
-            &fingerprint,
-            TrustClass::Volatile,
-            Some(3600),
-        );
-        let mut registry = ProbeRegistry::new();
-        if register {
-            registry
-                .register(Arc::new(ScriptedProbe::new("https").with_fallback(
+    let fp = || -> Fingerprint { fingerprint.parse().expect("fingerprint") };
+
+    let outcomes: Vec<(&str, (ValidityStatus, Vec<ReasonCode>))> = vec![
+        ("no probe registered", volatile_run(&fingerprint, |_| {})),
+        (
+            "probe matched",
+            volatile_run(&fingerprint, |r| {
+                r.register(Arc::new(ScriptedProbe::new("https").with_fallback(
+                    ProbeResult::Match {
+                        observed_fp: fp(),
+                        observed_trust_class: TrustClass::Volatile,
+                    },
+                )))
+                .expect("register");
+            }),
+        ),
+        (
+            "probe matched, reporting a higher class",
+            volatile_run(&fingerprint, |r| {
+                r.register(Arc::new(ScriptedProbe::new("https").with_fallback(
+                    ProbeResult::Match {
+                        observed_fp: fp(),
+                        observed_trust_class: TrustClass::Exact,
+                    },
+                )))
+                .expect("register");
+            }),
+        ),
+        (
+            "probe unknown, retryable",
+            volatile_run(&fingerprint, |r| {
+                r.register(Arc::new(ScriptedProbe::new("https").with_fallback(
+                    ProbeResult::Unknown {
+                        reason: "http-status=500".to_string(),
+                        retryable: true,
+                    },
+                )))
+                .expect("register");
+            }),
+        ),
+        (
+            "probe unknown, unretryable",
+            volatile_run(&fingerprint, |r| {
+                r.register(Arc::new(ScriptedProbe::new("https").with_fallback(
                     ProbeResult::Unknown {
                         reason: "no such resource".to_string(),
                         retryable: false,
                     },
                 )))
                 .expect("register");
-        }
-        let outcome = fixture.engine(registry).check_ok();
+            }),
+        ),
         (
-            outcome.certificate.status.value,
-            outcome
-                .certificate
-                .status
-                .reasons
-                .iter()
-                .map(|r| r.reason)
-                .collect::<Vec<_>>(),
-        )
-    };
+            "arbitration tie",
+            volatile_run(&fingerprint, |r| {
+                r.register(Arc::new(ScriptedProbe::new("https").with_priority(5)))
+                    .expect("register");
+                r.register(Arc::new(
+                    ScriptedProbe::new("https")
+                        .with_priority(5)
+                        .with_host_pattern("*"),
+                ))
+                .expect("register");
+            }),
+        ),
+    ];
 
-    let (unprobed_status, unprobed_reasons) = run(false);
-    let (probed_status, probed_reasons) = run(true);
-    assert_eq!(
-        unprobed_status,
+    let expected = (
         ValidityStatus::LikelyValid,
-        "ARCHITECTURE §7: inside its TTL a volatile edge is likely-valid"
+        vec![ReasonCode::TrustClassVolatileCapsAtLikelyValid],
+    );
+    for (label, actual) in &outcomes {
+        assert_eq!(
+            actual, &expected,
+            "`{label}` moved a volatile edge's verdict; inside a validated \
+             TTL only Drift may, and only downward"
+        );
+    }
+}
+
+/// Build a volatile edge inside its TTL, tune the registry, and check.
+fn volatile_run(
+    fingerprint: &str,
+    register: impl FnOnce(&mut ProbeRegistry),
+) -> (ValidityStatus, Vec<ReasonCode>) {
+    let fixture = Fixture::new("volatile-probe-independence").with_probe_edge(
+        "https",
+        "acme.com/pricing",
+        fingerprint,
+        TrustClass::Volatile,
+        Some(3600),
+    );
+    let mut registry = ProbeRegistry::new();
+    register(&mut registry);
+    let outcome = fixture.engine(registry).check_ok();
+    (
+        outcome.certificate.status.value,
+        outcome
+            .certificate
+            .status
+            .reasons
+            .iter()
+            .map(|r| r.reason)
+            .collect(),
+    )
+}
+
+/// The sixth non-`Drift` path, which needs two checks to reach: the
+/// probe that answered for this key is uninstalled between them.
+///
+/// For every other trust class that is `no-probe-available` / `unknown`.
+/// For `volatile` inside a validated TTL it is `likely-valid`, because
+/// probe removal yields the *absence* of a probe result and the TTL is
+/// the evidence that remains.
+///
+/// This test also pins ARCHITECTURE §7's **known remainder**: the first
+/// check observed `Drift` and reported `stale`, and after the probe is
+/// uninstalled the edge returns to `likely-valid` rather than staying
+/// stale. A recorded `probe.checked` with result `drift` is a durable
+/// fact that arguably should outlive the probe that observed it, but
+/// consuming prior drift observations is a store-projection design
+/// (`BUILD_PLAN` §7), not an evaluation-order tweak. `volatile` is the
+/// only class with this property, and it is deliberately open — if it
+/// closes, this assertion is the one that must change.
+#[test]
+fn a_volatile_edge_returns_to_likely_valid_when_its_drifting_probe_is_removed() {
+    let recorded = format!("blake3:{}", blake3_of("no-store-v1"));
+    let fixture = Fixture::new("volatile-drift-removed").with_probe_edge(
+        "https",
+        "churn.example.test/pricing",
+        &recorded,
+        TrustClass::Volatile,
+        Some(3600),
+    );
+    let mut registry = ProbeRegistry::new();
+    let identity = registry
+        .register(Arc::new(
+            ScriptedProbe::new("https").with_fallback(ProbeResult::Drift {
+                observed_fp: format!("blake3:{}", blake3_of("no-store-v2"))
+                    .parse()
+                    .expect("fingerprint"),
+                observed_trust_class: TrustClass::Volatile,
+            }),
+        ))
+        .expect("register");
+
+    let mut engine = fixture.engine(registry);
+    let drifted = engine.check_ok();
+    assert_eq!(drifted.certificate.status.value, ValidityStatus::Stale);
+
+    assert!(engine.engine.deregister_probe(&identity));
+    let after = engine.check_ok();
+    assert_eq!(
+        after.certificate.status.value,
+        ValidityStatus::LikelyValid,
+        "probe removal is the absence of a probe result; the validated \
+         TTL is the evidence that remains"
     );
     assert_eq!(
-        (probed_status, &probed_reasons),
-        (unprobed_status, &unprobed_reasons),
-        "registering an unrelated probe for the scheme changed the verdict"
+        after.certificate.status.reasons[0].reason,
+        ReasonCode::TrustClassVolatileCapsAtLikelyValid
+    );
+    assert!(
+        after
+            .events
+            .iter()
+            .any(|e| e.payload.get("message") == Some(&"probe.removed".into())),
+        "the removal is still recorded in the log even though it did not \
+         change the verdict"
+    );
+}
+
+/// The one outcome that *does* move it, and the whole reason volatile
+/// edges are still probed: `Drift` makes the artifact `stale`.
+///
+/// This is the real shape, not a hypothetical. `freshdag-probes`'
+/// `https.rs` classifies `Cache-Control: no-store` as `volatile` and
+/// returns `ProbeResult::Drift { observed_trust_class: volatile }` when
+/// the validator moved — none of its five `Drift` sites is conditioned
+/// on trust class. A trust class bounds how strongly FreshDAG may assert
+/// something is *unchanged*; it says nothing about its ability to
+/// observe that something *changed*. Reporting `likely-valid` on an
+/// input that demonstrably moved is invariant #7's harm from the
+/// opposite direction, and invariant #15 settles it.
+///
+/// `Stale` is exit 1 — `freshdag-cli`'s `exit.rs` maps it there and
+/// `validity_codes_match_the_architecture_contract` pins it. The engine
+/// does not own exit codes, so this asserts the status that mapping is
+/// total over.
+#[test]
+fn a_volatile_edge_whose_probe_reports_drift_is_stale() {
+    let recorded = format!("blake3:{}", blake3_of("no-store-v1"));
+    let moved = format!("blake3:{}", blake3_of("no-store-v2"));
+    let fixture = Fixture::new("volatile-drift").with_probe_edge(
+        "https",
+        "churn.example.test/pricing",
+        &recorded,
+        TrustClass::Volatile,
+        Some(3600),
+    );
+    let mut registry = ProbeRegistry::new();
+    registry
+        .register(Arc::new(ScriptedProbe::new("https").with_fallback(
+            ProbeResult::Drift {
+                observed_fp: moved.parse().expect("fingerprint"),
+                // What https.rs reports for a no-store endpoint: the
+                // server forbids caching assumptions, so the class is
+                // volatile — and the octets still demonstrably moved.
+                observed_trust_class: TrustClass::Volatile,
+            },
+        )))
+        .expect("register");
+    let outcome = fixture.engine(registry).check_ok();
+
+    assert_eq!(
+        outcome.certificate.status.value,
+        ValidityStatus::Stale,
+        "a volatile dependency whose probe observed drift is stale, not likely-valid"
     );
     assert_eq!(
-        unprobed_reasons,
-        vec![ReasonCode::TrustClassVolatileCapsAtLikelyValid]
+        outcome.certificate.status.reasons[0].reason,
+        ReasonCode::Drift
+    );
+    assert_eq!(
+        outcome.certificate.status.reasons[0].dependency_key,
+        "https://churn.example.test/pricing"
+    );
+    // The drift observation is in the log, not only on the certificate.
+    let checked = outcome
+        .events
+        .iter()
+        .find(|e| e.kind == EventKind::ProbeChecked)
+        .expect("the probe was dispatched, so it recorded what it saw");
+    assert_eq!(checked.payload["result"], "drift");
+    assert_eq!(checked.payload["trust_class"], "volatile");
+}
+
+/// The TTL gate still precedes the probe, so `Drift` cannot rescue an
+/// expired window into a *more* informative answer than the gate allows.
+/// Outside the TTL nothing is dispatched at all.
+#[test]
+fn an_expired_volatile_edge_is_unknown_even_with_a_drifting_probe() {
+    let recorded = format!("blake3:{}", blake3_of("no-store-v1"));
+    let fixture = Fixture::new("volatile-drift-expired").with_probe_edge(
+        "https",
+        "churn.example.test/pricing",
+        &recorded,
+        TrustClass::Volatile,
+        Some(60),
+    );
+    let mut registry = ProbeRegistry::new();
+    registry
+        .register(Arc::new(
+            ScriptedProbe::new("https").with_fallback(ProbeResult::Drift {
+                observed_fp: format!("blake3:{}", blake3_of("no-store-v2"))
+                    .parse()
+                    .expect("fingerprint"),
+                observed_trust_class: TrustClass::Volatile,
+            }),
+        ))
+        .expect("register");
+    let engine = fixture.engine(registry);
+    engine.clock.advance(time::Duration::seconds(3600));
+    let outcome = engine.check_ok();
+
+    assert_eq!(outcome.certificate.status.value, ValidityStatus::Unknown);
+    assert_eq!(
+        outcome.certificate.status.reasons[0].reason,
+        ReasonCode::TtlExpired
+    );
+    assert!(
+        outcome
+            .events
+            .iter()
+            .all(|e| e.kind != EventKind::ProbeChecked),
+        "the TTL gate short-circuits before dispatch, so no probe ran"
     );
 }
 
