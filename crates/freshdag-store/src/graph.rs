@@ -79,7 +79,7 @@ use freshdag_core::artifact::ArtifactId;
 use freshdag_core::certificate::CoverageEntry;
 use freshdag_core::computation::ComputationId;
 use freshdag_core::dependency::{Dependency, DependencyId, Fingerprint, TrustClass};
-use freshdag_core::ir::{EventKind, IrEvent, TypedPayload};
+use freshdag_core::ir::{EventKind, IrEvent, PartialCoverage, TypedPayload};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -295,7 +295,19 @@ pub enum SilenceMeaning {
     Unobserved,
     /// A contributing producer declares coverage but flags it partial.
     /// Treat with the same suspicion as [`Self::Unobserved`].
-    PartiallyObserved(Vec<String>),
+    ///
+    /// Carries the full [`PartialCoverage`] declarations, not just their
+    /// prose: a consumer must be able to read the *direction* of each
+    /// admission without pattern-matching a note (invariant #13, ADR
+    /// 0011). Refining this variant by direction — an
+    /// `over-approximates` producer's silence is arguably
+    /// [`Self::ObservedAbsent`], since over-approximation never misses
+    /// an event — is the `SilenceMeaning` work `docs/BUILD_PLAN.md` W9
+    /// assigns to `store-engineer`, and is deliberately not done here.
+    /// Today every direction is treated alike, which understates
+    /// confidence and therefore costs staleness rather than freshness
+    /// (invariant #15).
+    PartiallyObserved(Vec<PartialCoverage>),
     /// At least one contributing producer declares full coverage for
     /// this kind and emitted nothing. Absence is evidence of absence, to
     /// the limit of that producer's fidelity.
@@ -318,9 +330,11 @@ pub struct ComputationCoverage {
     /// Producers that emitted for it but have no registered manifest.
     /// Their silences cannot be interpreted at all.
     pub unregistered: Vec<ProducerKey>,
-    /// Partial-coverage notes declared by contributing producers, keyed
-    /// by event-kind wire string.
-    pub partial_notes: BTreeMap<String, Vec<String>>,
+    /// Partial-coverage declarations made by contributing producers,
+    /// keyed by event-kind wire string. Each carries a machine-readable
+    /// [`PartialReason`](freshdag_core::ir::PartialReason) alongside its
+    /// note; no consumer may decide from the note (ADR 0011).
+    pub partial_notes: BTreeMap<String, Vec<PartialCoverage>>,
 }
 
 impl ComputationCoverage {
@@ -742,7 +756,7 @@ impl DerivedGraph {
     fn build_attribution(&mut self, events: &[IrEvent], registry: &CoverageRegistry) {
         for comp in self.computations.keys() {
             let lookup = registry.coverage_for_computation(events, &comp.0);
-            let mut partial_notes: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            let mut partial_notes: BTreeMap<String, Vec<PartialCoverage>> = BTreeMap::new();
             for entry in &lookup.entries {
                 let key = ProducerKey::new(entry.producer.clone(), entry.version.clone());
                 if let Some(manifest) = registry.manifest(&key) {
