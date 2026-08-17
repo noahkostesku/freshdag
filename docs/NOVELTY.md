@@ -78,47 +78,95 @@ SkillDepAnalyzer, and TVCACHE all exist as named 2026 arXiv work. Only
 
 ## 2. What Survives — the Defensible Wedge
 
-The founding brief's thesis is a synthesis. After the novelty-adversary
-review argued that "dynamic inference of the dep graph from an unmodified
-agent runtime" is a rebranding of trace ingestion (LangSmith's
-`Run.parent_run_id` already gives you the graph; the "inference" is a
-`SELECT`), we tighten the surviving wedge:
+**Status:** rewritten 2026-08-16 by `architect`, resolving the §5.7
+escalation. The previous revision rested the wedge on the claim that no
+system "encodes the 'heuristic never promotes to valid' rule as a
+machine-checked property on their manifest." EA-Graph does, over an
+agent-artifact graph. That argument is retired, not repaired.
 
-> **Typed-trust-class validity aggregation over agent-produced
-> artifacts, driven by cross-session probes of external mutable state,
-> whose per-dependency bindings are derived from agent trace data.**
+The wedge, in one sentence:
 
-Why this phrasing survives where the looser one does not:
+> FreshDAG decides whether an artifact is still valid over a dependency
+> set that was **discovered rather than declared**, types each dependency
+> by validator strength, re-checks it against **external mutable state
+> after the producing process is gone**, refuses to promote the verdict
+> on missing evidence, and emits the whole judgment as a portable
+> manifest a third party can re-check.
 
-- **Trust-class-typed aggregation** (ADR 0004: `exact | versioned |
-  heuristic | volatile`) is the load-bearing primitive. No trace store,
-  no lineage graph, and no incremental-computation framework encodes
-  the "heuristic never promotes to valid" rule as a machine-checked
-  property on their manifest. This is what makes FreshDAG resistant to
-  "just run LangSmith with a SQL query."
-- **Cross-session external-mutation probing** is the acting-on-the-graph
-  step. Tracing tools record; Dagster asset sensors act but on authored
-  assets; FreshDAG acts on artifacts whose dependencies were inferred
-  from trace ingestion.
-- Trace-derived edges are consumed **substrate**, not contribution.
-  We do not claim to have invented dependency inference from tool
-  traces.
+**Every conjunct in that sentence is somebody else's.** This is not a
+concession extracted under review; it is the honest state of the art,
+and §3 firewalls each one:
 
-The name and framing survive with adjustments:
+| Conjunct | Prior art that owns it |
+| --- | --- |
+| Discovered, not declared, dependency sets | Ninja `deps=gcc`; Rattle; Shake. For agents: LangSmith `parent_run_id`, AgentTrails. |
+| Validator-strength typing (`exact`/`versioned`/`heuristic`/`volatile`) | RFC 9110 §8.8.1 strong vs. weak validators; RFC 9111 §4.2.2, which coins the term "heuristic freshness". Our four classes are that taxonomy plus content addressing. |
+| A typed evidence lattice over agent artifacts, with a never-promote rule | EA-Graph (`UNKNOWN < PARTIAL < PROVEN`; "LLM quarantine"). |
+| Cross-session observation of external mutable sources | Dagster `@observable_source_asset` + `FreshnessPolicy`; Iceberg/Nessie version tokens. |
+| Aggregating per-input freshness into a verdict on a derived thing | Make, Bazel, Salsa, Dagster, dbt. |
+| Provenance declaring its own blind spots so a verifier can refuse | SLSA v0.2 `metadata.completeness`; EA-Graph anchor-completeness. |
+| A portable, third-party-checkable manifest about a derived artifact | in-toto / SLSA; Reproducible Builds `.buildinfo`. |
+| Closed reason vocabulary plus a non-normative free-text sidecar | OpenVEX `justification` + `impact_statement`; RFC 5280 `CRLReason`. |
+| Append-only log with a disposable replayed projection | Event sourcing / CQRS; Datomic; Kafka log compaction. |
+| Reverse blast-radius index | DataHub Impact Analysis; dbt `state:modified+`. |
+
+**What is unoccupied is the conjunction, and nothing smaller.** The
+useful form of the claim is the gap each nearest neighbour leaves:
+
+- **HTTP** has the type system, one resource at a time. It never
+  aggregates a set of validators into a verdict about something
+  *derived from* those resources, and has no notion of a producer's
+  observation coverage.
+- **Dagster** has the aggregation *and* the cross-session observation of
+  external mutable sources — but the dependency set is authored. You
+  cannot put a freshness policy on a dependency you did not know your
+  agent had.
+- **EA-Graph** has the lattice, the refusal, and the agent-artifact
+  scope — but its anchors are local repository content re-read by
+  content hash. It has no model of a world outside the repository that
+  moves on its own.
+- **SLSA** has the blind-spot declaration and the portable manifest —
+  but self-declared by the builder, one-shot at build time, and never
+  re-evaluated as the world moves.
+
+No system evaluates typed, re-probed, cross-session validity over a
+dependency set it did not ask the user to declare. That is the whole
+claim. It is smaller than the previous revision's claim, and it is the
+part that is true.
+
+**This is an engineering claim, not a research claim, and we say so.**
+The correct public sentence is *"nobody has assembled this"*, never
+*"nobody has thought of this."* A reviewer who says "these are all known
+primitives" is right, and agreeing costs us nothing: the interesting
+question is whether the assembly is useful, which is an evaluation
+question (`docs/EVALUATION.md`), not a literature question. Any
+positioning document that argues the literature question has already
+lost.
+
+**Falsification conditions.** Any of these retires the wedge. We name
+them so they are a watch item rather than a surprise:
+
+1. Dagster, dbt, or DataHub ingesting agent traces as asset definitions.
+   This is the shortest path — they already own every other conjunct.
+2. EA-Graph or a successor adding an external-probe interface for
+   non-repository anchors.
+3. Anthropic shipping cross-session artifact freshness inside Claude
+   Code (`docs/BUILD_PLAN.md §8`).
+
+None of these is hard for its owner. Our defense is therefore not the
+idea. It is (a) adapter-agnosticism, (b) the certificate as a portable
+artifact other tools can consume rather than a proprietary status, and
+(c) refusing correctness shortcuts as coverage grows.
+
+**Naming and framing.**
 
 - Keep: "Know when agent outputs go stale."
-- Downshift: "make for conclusions about a changing world" is evocation
-  only, never a novelty claim. Dagster owns "make for X."
-- Elevate: **trust-class-typed validity certificates** — the shareable
-  primitive. Certificates are OpenLineage-facet-shaped in transport but
-  their `trust_class` typing + heuristic-cap rule is what has no clean
-  precedent.
-
-The narrowing does not shrink the product; it protects it. A reviewer
-who claims "you're just LangSmith + a SQL query" now has to explain
-why LangSmith enforces `heuristic → likely-valid`, checks external
-mutable state cross-session, and refuses to promote `Unknown` — which
-it does not.
+- Never: "make for X" as a novelty claim. Dagster owns it; it is
+  evocation only.
+- Do **not** elevate trust-class typing. RFC 9111 got there first and
+  restated it in 2022, and EA-Graph did the agent-artifact version.
+  Elevate **the certificate**: a machine-checkable statement about an
+  artifact whose dependency list nobody had to write down.
 
 ---
 
@@ -214,31 +262,56 @@ must be verified against current sources:
 6. **Recent Cognition / Factory / Poolside / Adept** product surfaces.
    Long-lived agent sessions are the most likely to ship a competing
    freshness story.
-7. **OPEN ESCALATION TO `architect` — §2's supporting argument is
-   falsified as written.** §2 justifies the wedge by asserting that "no
-   trace store, no lineage graph, and no incremental-computation
-   framework encodes the 'heuristic never promotes to valid' rule as a
-   machine-checked property on their manifest." **EA-Graph** (§1) does
-   encode exactly that rule, machine-checked, over an agent-artifact
-   graph: its LLM-quarantine rule is "no model output enters at
-   `PROVEN`", and its anchor-completeness check is a coverage-deficit
-   analogue. EA-Graph is technically none of the three named categories,
-   so the sentence is not literally false — but it is rhetorically dead,
-   and a reviewer will say so in the first minute.
+7. ~~**OPEN ESCALATION TO `architect` — §2's supporting argument is
+   falsified as written.**~~ **RESOLVED 2026-08-16 by `architect`. §2
+   rewritten.**
 
-   Two further §1 additions narrow the same territory from the
-   supply-chain side: **SLSA `metadata.completeness`** predates the
-   coverage-deficit rule as a primitive, and **OpenVEX** predates ADR
-   0006's closed-reason-vocabulary-plus-non-normative-detail shape.
+   The escalation was upheld. EA-Graph does encode a machine-checked
+   never-promote rule over an agent-artifact graph, so §2's supporting
+   sentence was rhetorically dead and has been deleted rather than
+   reworded. Independently re-verified against arXiv:2608.04278: the
+   abstract states the system "keeps evidence strength separate from
+   freshness" and that a claim "becomes unprovable rather than guessed"
+   when replacement content is unavailable, over sub-path-granular,
+   alias-resolved, content-anchored local repository artifacts. It does
+   not mention probing external mutable state.
 
-   The one-sentence conjunction in §2 still has no match, because
-   EA-Graph does not probe **external mutable state across sessions** and
-   emits no **portable certificate**. The novelty-reviewer's position is
-   therefore: the wedge survives, but its *load* must shift from
-   "trust-class typing is unprecedented" to "trust-class typing bound to
-   cross-session external-mutation probing, in a portable artifact, is
-   unprecedented." Rewriting §2 is the architect's call, not the
-   reviewer's.
+   **Where the architect went further than the reviewer.** The reviewer
+   proposed shifting §2's load onto "trust-class typing bound to
+   cross-session external-mutation probing, in a portable artifact."
+   That replacement load-bearer is also individually occupied, in two
+   places the reviewer did not press:
+
+   - **Cross-session observation of external mutable state** is
+     Dagster's `@observable_source_asset`, shipped, and Iceberg/Nessie's
+     version tokens.
+   - **The portable third-party-checkable artifact** is in-toto/SLSA and
+     Reproducible Builds `.buildinfo`.
+   - And **trust-class typing itself** is not merely "narrowed" by
+     EA-Graph; the four classes are RFC 9110/9111's strong-validator /
+     weak-validator / heuristic-freshness / no-validator taxonomy with
+     content addressing added. The word "heuristic" is theirs.
+
+   So no single conjunct survives, and any §2 that rests on one is a
+   fresh hostage. The rewritten §2 therefore rests on the **conjunction
+   over an undeclared dependency set** and states explicitly that every
+   component is prior art. It also downgrades the register of the claim
+   from research novelty to engineering assembly, and names three
+   falsification conditions.
+
+   Consequences accepted with this resolution:
+
+   - §2 no longer supports any marketing sentence of the form "we
+     invented X." `.claude/rules/novelty.md` already requires
+     `novelty-reviewer` on README changes; that review should now check
+     the *register* of the claim, not only its content.
+   - "Elevate trust-class-typed certificates" is retired as a
+     positioning instruction. What is elevated is the certificate over
+     an undeclared dependency set.
+   - The wedge's defensibility is now explicitly execution-based, which
+     makes `docs/EVALUATION.md` — not this document — the place the
+     claim is won or lost. Wave 3 is scoped accordingly
+     (`docs/BUILD_PLAN.md §6`).
 
 Owner: `novelty-reviewer` agent (see `.claude/agents/novelty-reviewer.md`).
 

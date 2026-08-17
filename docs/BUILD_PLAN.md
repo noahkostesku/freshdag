@@ -172,15 +172,109 @@ store, W5.2 HTTPS probe, W6.2 coverage-manifest wire-up, W3 derived
 graph, W4 engine) with dependencies, verification requirements, and
 the adversarial-review triple at the end.
 
-A fresh Claude Code session executes Wave 2 with:
+**Wave 2 landed on `main` (`7e6b8bd`)**: Claude adapter + hook binary,
+append-only store, derived dependency graph, HTTPS probe, engine
+validity evaluation with probe registry / anti-thrash ledger / coverage
+gate, `freshdag check` end-to-end with load-bearing exit codes, six
+scenarios, 414 test results green.
 
-```
-Read CLAUDE.md and docs/prompts/wave-2.md, verify the actual
-repository state, then execute Wave 2 as the release-manager.
-```
+---
 
-The `release-manager` assigns Phase A. Every parallel workstream is
-claimed by its subsystem owner per `docs/OWNERSHIP.md`.
+## 6.2. Wave 3 — the dogfood wave
+
+**Decided 2026-08-16 by `architect` at the Wave 2 completion review.**
+
+### The one thing
+
+> **Produce a certificate from a real, unmodified Claude Code session,
+> and measure honestly how much of that session FreshDAG could see.**
+
+FreshDAG has never done this. Every certificate in the repository — all
+six scenarios, every conformance fixture, every one of the 414 tests —
+is computed from hand-written IR. The 414 tests establish that the
+implementation matches our assumptions. Nothing yet establishes that our
+assumptions match an agent.
+
+That is the largest single gap between "the code works" and "the thesis
+is real", and it is far larger than the gaps the wave recorded (no macOS
+observer, only two probe schemes, six fixtures). Those are all *answers*
+to a question we have not asked. Which one matters is currently a guess,
+and it is a guess we can retire cheaply.
+
+### Why this and not the obvious candidates
+
+- **More probes** (`attio://`, `mcp://`) — a bet that external
+  dependencies dominate. Plausible, unmeasured. Each new scheme is real
+  work and cannot be un-shipped.
+- **A macOS observer backend** — a bet that `bash`/`task` opacity
+  dominates. Also plausible, also unmeasured, and the observer memo
+  already says the honest macOS answer is expensive.
+- **Recomputation / `refresh-on-stale`** — the product-adversary is
+  right that it is the value prop, but building minimal recomputation on
+  top of detection we have never validated against a real run is
+  building the second floor first.
+- **More fixtures** — raises confidence in the engine, not in the
+  thesis. Fixtures test us against our own model of the world.
+
+The dogfood wave's output is a **number**, and that number picks Wave 4.
+`docs/EVALUATION.md §3` already names it: **coverage silence rate**,
+plus the fraction of dependency edges resolving to `no-probe-available`
+and the fraction of computations carrying an undischarged `bash`/`task`
+obligation. If real sessions are mostly `no-probe-available`, Wave 4 is
+probes. If they are mostly unobserved subprocesses, Wave 4 is the
+observer. If they are mostly files and it works, Wave 4 is
+recomputation. Right now all three are defensible, which means none of
+them is chosen.
+
+### What it costs
+
+Small in code, and mostly work already owed. Three workstreams:
+
+**W10. Close the record loop** (blocking; `graph-engineer` +
+`integration-engineer`). Implements ADR 0007 items 1–2: the engine
+publishes its coverage manifest, the CLI registers it, and `check`
+appends the engine's `probe.checked` / `diagnostic` events. Without
+this, a real store's checks leave no trace and the anti-thrash protocol
+stays inert. Also lands ADR 0007 item 3, the additive `probe_identity`
+payload field.
+
+**W11. Wire the hook to a store, not a file** (`claude-adapter` +
+`integration-engineer`). Today `freshdag-claude-hook` appends to a bare
+JSONL path and never registers a coverage manifest, so a store built
+from a real session reports `producer-missing-from-coverage` on
+everything and every artifact is `unknown` for the wrong reason. Two
+concrete gaps:
+
+- The hook must register `freshdag-adapter-claude`'s manifest in the
+  store's `coverage.jsonl` on first write.
+- **Nothing emits `artifact.produced`.** Without it there is no artifact
+  to check. The adapter cannot know which file is "the artifact" — that
+  is a user declaration — so this needs a minimal surface: promote
+  `Write`/`Edit` outputs, or a `freshdag mark <path>` command. Smallest
+  honest option wins; `integration-engineer` proposes.
+
+**W12. Coverage honesty report** (`integration-engineer` + `eval-engineer`).
+A `freshdag coverage` (or `why --coverage`) that computes the Tier-1
+metrics above from a real store. This is the deliverable; W10 and W11
+are its preconditions.
+
+**W13. Run it, and write down what happened** (`architect` +
+`eval-engineer`). Ten ordinary sessions with the hook installed. Mutate
+the world. Run `check`. Record the outcome in `docs/DOGFOOD.md`,
+including the sessions where FreshDAG saw nothing useful.
+
+Landing alongside, because they touch the reason vocabulary and the
+fixtures W13 will read: the contract-change PRs for ADR 0009 (two new
+reason codes) and ADR 0010 (demotion trigger), and the ADR 0007
+follow-through.
+
+### The risk, named up front
+
+The honest outcome may be "we saw 20% of it." That is the point. A wave
+that can only confirm is not an experiment, and `docs/NOVELTY.md §2` now
+rests the wedge on execution rather than on invention — which makes
+`docs/EVALUATION.md`, not `docs/NOVELTY.md`, the document where the
+claim is won or lost.
 
 ## 6.1. Provisional-to-Stable Contract Transitions
 
@@ -214,6 +308,31 @@ edits.
   review argued this is what turns detection into a value prop. v0
   ships detection; the follow-up ships refresh. Track separately.
 - UI (`apps/web`).
+- **A first-class `DependencyKey` core type.** Deferred 2026-08-16 by
+  `architect`. The probe contract calls the key "scheme-specific
+  opaque", and opacity is load-bearing: a scheme-discriminated enum
+  would make every new scheme (`attio://`, `mcp://`) a `freshdag-core`
+  change, which is invariant #14 and the "do NOT modify `freshdag-core`
+  to accommodate the adapter" rule in `.claude/rules/architecture.md`.
+  A bare newtype over `String` buys type-safety the `(scheme, key)` pair
+  already provides, at the cost of a contract change touching core,
+  store, engine, probes, two schemas, and every fixture. Not worth one
+  today.
+  **Trigger that forces it:** the first demonstrated key-aliasing
+  defect — two spellings of the same dependency producing two graph
+  nodes, two reverse-index entries, or two anti-thrash ledger keys. The
+  `unicode-path` (NFC vs. NFD) and `symlink-swap` fixtures in
+  `docs/EVALUATION.md §2`'s backlog are the ones most likely to expose
+  it. When it lands it is a **newtype whose constructor is the single
+  canonicalization point**, never a scheme enum.
+
+- **Folding `freshdag-store` into `freshdag-engine`.** Rejected
+  2026-08-16 by `architect`; see `ARCHITECTURE.md §4`. Not reopened
+  without new information. Note that the friction W4 reported —
+  `Engine::check` filtering its own event vector by `computation_id`,
+  duplicating `CoverageRegistry::coverage_for_computation` — is an
+  argument for a store API addition, not a merge, and is tracked in §6.2
+  as part of W10.
 
 Every deferred item is a candidate parallel workstream after v0
 detection ships.

@@ -37,8 +37,14 @@ depends on
   attio.company(acme)   versioned   version:42
   acme.com/pricing      versioned   etag:"abc…"
   web.search(...)       volatile    ttl:3600s
-status  VALID
+status  LIKELY VALID
+        web.search(...) is volatile and caps the status; its declared
+        TTL has not elapsed
 ```
+
+That certificate is `LIKELY VALID`, not `VALID`, and it always will be:
+one `volatile` dependency caps the whole artifact. FreshDAG will not
+round that up.
 
 ## Status
 
@@ -54,6 +60,13 @@ before large-scale implementation begins.
   dependency graph; `file://` and `https://` freshness probes; and an
   engine that aggregates per-dependency evidence into a certificate.
   Detection only — no recomputation, no comparators, no early cutoff.
+- **Not yet demonstrated.** Every certificate produced so far comes
+  from hand-written observation logs. FreshDAG has not yet emitted one
+  from a real agent session, and has not measured how much of such a
+  session it can actually see. That is the next wave
+  (`docs/BUILD_PLAN.md §6.2`), and until it lands, treat the claims
+  above as "the code does what we specified", not "the specification is
+  right."
 - **Planned next.** See `docs/BUILD_PLAN.md`.
 
 ## Why FreshDAG
@@ -125,6 +138,17 @@ fixtures/                   deterministic scenarios used for evaluation
 - **LangGraph checkpoints and time-travel.** They give you replay of an
   authored graph. FreshDAG gives you invalidation of an inferred one,
   across sessions, as external state changes.
+- **EA-Graph.** The closest published system: a typed evidence lattice
+  over agent-produced artifacts that refuses to promote a claim on
+  missing evidence, which is the same discipline FreshDAG applies. Its
+  anchors are local repository content, re-read by content hash.
+  FreshDAG's dependencies include a mutable world outside the repo —
+  APIs, pages, records — re-probed after the producing session is gone.
+- **HTTP caching (RFC 9110/9111).** FreshDAG's four trust classes are
+  the strong-validator / weak-validator / heuristic-freshness /
+  no-validator taxonomy, borrowed openly. What HTTP does not do is
+  aggregate a set of validators into a verdict about something
+  *derived* from those resources.
 - **FreshLLMs and temporal RAG.** They answer "is this factual answer
   still true?" via re-retrieval. FreshDAG answers "is this artifact
   still valid?" via its dependency graph.

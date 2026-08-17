@@ -189,6 +189,19 @@ be reconstructable from the canonical log (invariant #5).
 runs validity evaluation, and drives invalidation. Recomputation
 scheduling and equivalence live here too.
 
+**The store does not fold into the engine** (decided 2026-08-16; the
+question was raised at the end of Wave 2 and is closed). The store is
+the party that must be able to say "here is the log, here is the
+deterministic projection, check my work" — invariant #5 is a property of
+a component, not of a call graph, and folding it into the evaluator
+makes the projection an implementation detail nobody can rebuild without
+instantiating a probe registry and a clock. Invariant #12 depends on the
+same separation: `apps/web` and `freshdag graph` / `freshdag why` are
+store queries with no engine in them. **Derivation from the log is the
+store's job, exclusively.** An engine that filters the raw event vector
+itself — for any reason, including convenience — is re-deriving, and the
+fix is a store API that exposes what it needs, not a merge.
+
 **CLI** (`freshdag-cli`) is the primary v0 surface.
 
 ---
@@ -259,8 +272,35 @@ proceeds edge-by-edge:
    - `exact` + `Match` → `Valid`.
    - `versioned` + `Match` → `Valid`.
    - `heuristic` + `Match` → `Likely Valid` (never a bare `Valid`).
-   - `volatile` inside TTL → `Likely Valid`; outside TTL → `Unknown`.
+   - `volatile` inside TTL → `Likely Valid`, **whether or not a probe
+     ran** (see below); outside TTL → `Unknown`.
    - Any trust class + `Unknown` → `Unknown`.
+
+**The `volatile` row does not presuppose a probe.** Every other row of
+that table is `<trust class> + <probe result>`; the `volatile` row names
+no probe result, and that is deliberate rather than a drafting gap. A
+`volatile` dependency is by definition one for which *no trustworthy
+freshness signal exists* (§6) — there is nothing a probe could compare
+against. The evidence for the verdict is the producer's **declared TTL**,
+recorded in the log at observation time. That is present evidence about
+a real assertion, not absent evidence: invariant #7 forbids promoting a
+verdict on evidence we do not have, and a declared lifetime is evidence
+we do have. The verdict is capped at `Likely Valid` and can never reach
+`Valid`, so the strongest statement a user ever receives is "likely
+valid, because the producer declared a lifetime and it has not elapsed",
+which is exactly true. The precedent is unambiguous: RFC 9111 §4.2
+serves a stored response as fresh, without revalidation, purely because
+its declared lifetime has not elapsed.
+
+This is the **only** place in FreshDAG where "no probe ran" is not
+`Unknown`. Because it is the only one, it must be visible in the
+machine-readable output rather than in prose: an unprobed volatile edge
+inside its TTL carries `volatile-within-ttl-unprobed`, distinct from the
+probed case's `trust-class-volatile-caps-at-likely-valid` (ADR 0009).
+Implementations must evaluate this rule as a positive branch keyed on
+trust class, before probe arbitration — never as a fallback in an
+arbitration-failure path, where registering an unrelated probe for the
+scheme would silently change the verdict.
 
 The artifact's overall validity is the strict aggregation of its edges:
 
