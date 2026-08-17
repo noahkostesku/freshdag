@@ -335,6 +335,111 @@ rests the wedge on execution rather than on invention — which makes
 `docs/EVALUATION.md`, not `docs/NOVELTY.md`, the document where the
 claim is won or lost.
 
+## 6.3. Remediation owed from the 2026-08-17 architect review
+
+The retrospective `architect` review of the 26 PRs merged on 2026-08-17
+(ADRs 0013 ratified with conditions, 0014 ratified with conditions,
+0015 and 0016 new) left the following owed. None of it is new feature
+work; all of it is closing a gap the review found.
+
+**None of these is a reason to open new contract surface.** Read
+§"Standing instruction" below before starting any of them.
+
+### Blockers on further vocabulary growth
+
+**R1. The reason-code drift guard** (`core-engineer`; `verifier`
+confirms). ADR 0015 Decision 4, all four parts: one declaration site for
+the variant list and its wire strings; schemas checked against the enum
+rather than against a hand-maintained copy; a test that parses the
+`§Reason Codes` table out of `certificate-contract.md` and compares it
+to the enum both directions; a negative fixture pinning that an unknown
+code fails to deserialize. The verifier confirms by reproducing the
+original break — add a variant, omit it everywhere else, require red.
+
+Until R1 lands, no fifteenth reason code, except one required to close a
+demonstrated invariant-#7 violation (ADR 0015 Decision 5).
+
+### `freshdag mark` becomes a first-class producer (ADR 0016)
+
+**R2.** Injected `Clock` and `IdGen` in `mark`; the ambient pair stays
+in `freshdag-cli::main` (`integration-engineer`). Prerequisite for R3.
+
+**R3.** `fixtures/adapter-conformance/cli-mark/` — one fixture per
+branch `b052a98` had to repair, plus a golden `artifact.produced`
+envelope (`integration-engineer` authors, `eval-engineer` reviews).
+
+**R4.** `mark`'s manifest declares `artifact.produced` as
+`under-approximates` (`integration-engineer`). Latent today —
+`artifact.produced` is not an effect kind — and the same shape as the
+hole W9 closed.
+
+**R5.** *Contract change.* A §Artifact Attribution clause in
+`adapter-contract.md`, and a §Event Envelope edit in `execution-ir.md`
+admitting a fourth producer shape and separating the normative
+exact-string rule from the naming convention (`integration-engineer`
+authors; `architect` signs as contract owner). Full process — label,
+policy answers, owner acknowledgements.
+
+### Corrections to the record
+
+**R6.** `crates/freshdag-core/src/determinism.rs` still carries the
+purity argument ADR 0013 §Decision 1 explicitly rejects
+(`core-engineer`). Documentation only. A future agent reading the code
+first — which `.claude/rules/` assumes they do — currently gets the
+rejected argument.
+
+### Carried forward, not new
+
+**R7.** Undecorated test doubles in core's public API — ADR 0013 §Still
+open, condition 3 of the PR #11 review, still unresolved.
+`SeededIdGen`'s own documentation advertises that its output is
+"indistinguishable from real UUIDv7s to any consumer that only inspects
+the version," which is exactly what makes accidental production use
+undetectable at the point of use. Candidate remedies: a feature gate, or
+a rename to `ConformanceClock` / `ConformanceIdGen`. Decide it or
+document why it is acceptable; do not leave it in a §Still open section
+for a third wave.
+
+### The masking risk, named so it is not forgotten
+
+ADR 0014 caps every artifact from adapter #1 at `unknown`, permanently,
+because Claude Code exposes no recipe. §6.2 set W10/W11 in motion to
+*remove* an accidental universal mask; this is a deliberate one, and it
+is still the right call — the alternative emitted no certificate at all.
+
+Two standing constraints while it holds:
+
+- The synthetic fixture path must keep exercising `valid`
+  (`fixtures/certificate-conformance/positive/*` and four scenarios do
+  today). A suite where nothing reaches `valid` cannot detect a
+  promotion bug, and every latent freshness defect below the cap would
+  be invisible. `b052a98`'s subagent-blindness defect is the worked
+  example: unobserved delegation reaching `valid`, live only because the
+  cap was hiding it.
+- No `docs/DOGFOOD.md` figure may be read as evidence about the world
+  while the cap is universal. The log already says this.
+
+### Standing instruction: stop adding contract surface
+
+The single most important thing this project should do next is **finish
+the dogfood wave**. §6.2 pre-committed to it: the wave's output is a
+number, and that number picks Wave 4. One session of ten exists, at 8%
+observability, with `valid` unreachable through the only real adapter.
+
+On 2026-08-17 the project added four reason codes, two ADRs, a new
+producer, and a new CLI command, and measured its own thesis once. That
+ratio is inverted. Contract surface is the cheapest thing to add and the
+most expensive thing to be wrong about, and nothing added that day was
+demanded by a real session — every one of them came from reading our own
+code.
+
+Until sessions 2–10 are in `docs/DOGFOOD.md`, the default answer to
+"should this be a new reason code / field / status / contract clause?"
+is **no**, and the burden is on the proposer to name the real session
+that demanded it. The exceptions are R1–R6 above, which remove surface
+or guard what exists, and anything closing a demonstrated invariant-#7
+violation.
+
 ## 6.1. Provisional-to-Stable Contract Transitions
 
 Contracts in `docs/contracts/` currently carry `Status: provisional`.
@@ -348,6 +453,16 @@ A contract transitions to `Status: stable` when ALL of:
 3. The contract owner explicitly requests the transition in a PR
    labeled `contract-change` with `[status: stable]` in the title.
 4. `architect` and `release-manager` both sign off.
+
+Two additional gates on `certificate-contract.md` specifically
+(ADR 0015 Decision 5):
+
+5. The reason-code drift guard (§6.3 R1) is in place. Freezing a
+   vocabulary whose consistency is enforced only by one exhaustive
+   `match` in the CLI freezes whatever happens to be in it.
+6. The dogfood wave has reported (§6.2). A vocabulary that has never met
+   a real session is a set of guesses, and stabilisation is the point at
+   which adding a member becomes a `v0.2` schema bump.
 
 After stabilization, further changes require the full contract-change
 process (`.claude/rules/architecture.md`) — no more provisional

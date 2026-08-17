@@ -1,7 +1,10 @@
 # ADR 0014: Cap on missing recipe identity, rather than refusing to seal
 
-- **Status:** proposed — `architect` sign-off owed
+- **Status:** accepted — ratified with conditions by `architect` review,
+  2026-08-17 (retrospective; the change had already merged). See
+  §Ratification.
 - **Date:** 2026-08-17
+- **Reviewed by:** `architect`, 2026-08-17 — ratify with conditions
 - **Deciders:** human owner (Noah Kostesku), by delegation
 - **Consulted:** invariant #9; `docs/contracts/certificate-contract.md`
   §Field Rules; ADR 0006 (closed reason-code vocabulary);
@@ -158,3 +161,118 @@ policy answers.
 If that review disagrees, the claim to attack is §"Why a verdict and not
 an error": that a permanently-absent recipe hash is a fact about
 evidence rather than a fault. Everything else follows from it.
+
+---
+
+## Ratification (2026-08-17): the load-bearing claim survives; three conditions
+
+The `architect` review attacked §"Why a verdict and not an error" as
+instructed. **The claim survives, and the decision is ratified.** The
+reasoning, and what the review found that the ADR did not say.
+
+### The attack, and why it fails
+
+The strongest objection is that a missing `recipe_hash` is a **producer
+fault**, not an evidence state. Under that reading
+`freshdag-adapter-claude` is a non-conformant producer, the engine's
+refusal was correctly reporting a broken adapter, and capping at
+`unknown` launders a producer defect into a verdict — removing the
+pressure to fix it and normalising it for every adapter that follows.
+
+That objection is answered by the IR contract, not by this ADR.
+`docs/contracts/execution-ir.md §Event Envelope` says:
+
+> Adapters that cannot supply a `recipe_id_or_hash` MUST synthesize one
+> from a session-scoped stable identifier and record the rule used.
+
+The contract already contemplates producers that cannot supply recipe
+identity and prescribes exactly what the Claude adapter does. The
+absence is **licensed by the contract the adapter is conformant to**, so
+it is not a fault. That settles it, and it is a stronger footing than
+the exit-code argument the ADR leads with — the exit-code argument
+establishes only that `unknown` is the right *report* if the condition
+is an evidence state, which is the thing under dispute.
+
+The second half of the claim — permanence — is established
+independently: for a runtime exposing no recipe there is no fix, so an
+error code, which by the CLI's own §exit.rs semantics means "the tool
+failed", asserts something false about the world.
+
+### Condition 1 — the code conflates two conditions, and must stay that way
+
+`recipe-identity-unavailable` fires identically when the runtime can
+never supply a recipe (Claude Code) and when a producer that *could*
+supply one simply did not (a bug). The certificate does not distinguish
+them, and invariant #6 takes a real if minor loss: a user cannot tell
+"fix your adapter" from "this runtime can never do better."
+
+**No fifteenth code.** Under ADR 0012's amended test the distinction is
+carried losslessly by the producer's `known_limitations` and by
+`detail`, and no engine branch could act on it — both cases cap at
+`unknown` under invariant #7, which is the whole machine-readable
+consequence. A member that changes no verdict and duplicates a note is
+the case ADR 0012 rejects. This paragraph exists so the next agent that
+notices the conflation finds it already ruled on.
+
+### Condition 2 — the cap is a mask, and the record must keep saying so
+
+This is the finding the ADR does not make, and it is the significant
+one. `docs/BUILD_PLAN.md §6.2` set W10/W11 in motion specifically to
+*remove* an accidental universal mask ("nothing in production registers
+a coverage manifest, so every real check caps at `unknown`… which would
+make those numbers worse than useless"). This ADR installs a
+**deliberate** universal mask over adapter #1 on the same day: every
+artifact the Claude adapter produces now caps at `unknown` for one
+structural reason, whatever else the engine gets right or wrong.
+
+`b052a98` is the proof this matters. The subagent-blindness defect it
+fixed — an artifact reaching `valid` after an unobserved delegation —
+was, in its own words, "not live today only because the recipe-identity
+cap holds every Claude-adapter artifact at `unknown`, which is masking
+rather than safety."
+
+The cap is still the right call: the alternative masks harder, since
+refusing to seal emits no certificate at all. But two things are
+required and are ratified as conditions:
+
+1. **The synthetic path must keep testing `valid`.** It does today —
+   `fixtures/certificate-conformance/positive/*` and four scenarios
+   carry a `recipe_hash` and reach `valid`, so engine correctness above
+   the cap is exercised. This must not be allowed to lapse; a suite in
+   which nothing reaches `valid` cannot detect a promotion bug.
+2. **No dogfood number may be read as evidence about the world while
+   the cap is universal.** `docs/DOGFOOD.md` already says this
+   ("it is masking, not safety"). It stays.
+
+### Condition 3 — the exit-code move needed a sign-off it did not get
+
+See §6 of the 2026-08-17 review and `docs/OWNERSHIP.md`: exit codes are
+stable ABI with mutual sign-off between `integration-engineer` and
+`graph-engineer`. Deleting `CheckError::NoRecipeIdentity` and moving the
+condition from exit 3 to exit 2 is an ABI change made without it.
+
+**Ratified after the fact, because the direction is provably safe:** no
+path that previously exited `0` changed, and no path that previously
+exited non-zero now exits `0`. A CI consumer's reuse decision is
+identical before and after; only the "ignore this result" versus "do not
+reuse" reading moves, and it moves toward the true one. The requirement
+is recorded, not waived — see `.claude/rules/architecture.md` §"Reviews
+that are owed even when the contract-change process does not apply".
+
+### Sustained without conditions
+
+- **Why a new code rather than reusing one.** Correct.
+  `no-dependencies-observed` would state something false; the coverage
+  codes are about vantage point, and nothing here went unobserved.
+- **`unknown`, not `likely-valid`.** Forced by §Field Rules; correct.
+- **`stale` not capped.** Correct and consistent with every other use of
+  `cap_at_unknown`.
+- **Keeping `EngineError::MissingRecipeHash` as an unreachable
+  backstop.** Correct, and well placed: `seal.rs` catches it after every
+  downgrade has been applied, which is the last point before bytes
+  exist.
+- **Rejecting a synthesized `recipe_hash`.** Emphatically correct. That
+  is the invariant-#7 failure mode with extra steps, as the ADR says.
+- **The self-correction in §Consequences** (the vocabulary "guard" that
+  does not guard). Accurate, and now acted on — see ADR 0015 and
+  `docs/BUILD_PLAN.md §6.3`.

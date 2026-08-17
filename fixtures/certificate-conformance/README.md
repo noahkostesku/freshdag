@@ -42,13 +42,19 @@ fixtures live under `illegal/` with `"invariant_check": "pass"`.
   name (`NakedVolatile`, `EmptyObservationCoverage`, ...); when `pass`
   it is free-text prose. It is NOT a wire reason code.
 - `certificate.json`'s **`status.reasons[].reason`** is a wire reason
-  code from the closed `ReasonCode` set (kebab-case; see
-  `schemas/certificate/v0.1.json`): `drift`, `probe-unknown`,
-  `trust-class-heuristic-caps-at-likely-valid`,
-  `trust-class-volatile-caps-at-likely-valid`, `ttl-expired`,
-  `coverage-deficit`, `no-dependencies-observed`,
-  `probe-trust-demoted`, `producer-missing-from-coverage`. Anything
-  else fails to deserialize.
+  code from the closed `ReasonCode` set (kebab-case). Anything outside
+  the set fails to deserialize.
+
+  **The members are deliberately not listed here.** Read them from
+  `docs/contracts/certificate-contract.md §Reason Codes`, which carries
+  each code's scope and meaning, or from `ReasonCode` in
+  `freshdag-core::dependency::validity`, which is the source of truth.
+  `schemas/certificate/v0.1.json` is the machine-checkable mirror.
+
+  An enumeration in this file would be a fourth copy of a vocabulary
+  that changed four times on 2026-08-17, and the copy that used to be
+  here was stale at 9 of 14 members within a day. ADR 0015 Decision 3
+  makes every non-normative mention a pointer rather than a list.
 - `certificate.json`'s optional **`status.reasons[].detail`** is human
   context only (probe failure text, HTTP status). No decision may key
   off it.
