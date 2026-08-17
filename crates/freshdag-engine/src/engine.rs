@@ -476,12 +476,29 @@ impl Engine {
                     observed_trust_class,
                     now,
                 );
-                // The class written to the log is the *adopted* one, so
-                // a replay of this event cannot escalate a dependency's
-                // trust class behind the anti-thrash protocol's back.
-                let adopted = ledger
-                    .adopted(&dep.key, &selected.identity)
-                    .unwrap_or(dep.trust_class);
+                // The payload carries *inputs only* (ADR 0007, Amendment
+                // P1): `trust_class` is the class the store recorded on
+                // the dependency, `observed_trust_class` is what the
+                // probe saw this time. Neither is derived.
+                //
+                // Writing the ledger's *adopted* class here — which this
+                // code used to do, with a comment claiming the opposite
+                // — is wrong twice over. It is a silent escalation
+                // across a process boundary: after N=2 the adopted class
+                // is the escalated one, so a replay of the log yields
+                // `Valid` where the store recorded `Heuristic`
+                // (invariants #7 and #8). And because ADR 0007 makes the
+                // ledger a *fold over* `probe.checked`, writing the
+                // fold's own output into the events being folded makes
+                // the projection non-idempotent — derived state whose
+                // value depends on how many times it has been derived is
+                // not reconstructable in the sense invariant #5 means.
+                //
+                // Adoption stays auditable: it is reconstructable from
+                // the `observed_trust_class` sequence, which is what the
+                // anti-thrash protocol was always defined over, and the
+                // transitions themselves surface as `probe.trust_demoted`
+                // and `probe.trust_escalated` diagnostics below.
                 emitted.push(self.probe_checked(
                     computation,
                     now,
@@ -489,10 +506,24 @@ impl Engine {
                     dep,
                     "match",
                     Some(&observed_fp.to_string()),
-                    adopted,
+                    dep.trust_class,
                     observed_trust_class,
                     None,
                 ));
+                if let TrustTransition::Escalated { from, to } = transition {
+                    emitted.push(self.diagnostic(
+                        computation,
+                        now,
+                        sequence,
+                        "probe.trust_escalated",
+                        serde_json::json!({
+                            "dependency_key": dep.key,
+                            "probe_identity": selected.identity.as_str(),
+                            "from_trust_class": trust_wire(from),
+                            "to_trust_class": trust_wire(to),
+                        }),
+                    ));
+                }
                 if let TrustTransition::Demoted { from, to } = transition {
                     emitted.push(self.trust_demoted(
                         computation,

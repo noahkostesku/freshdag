@@ -973,18 +973,126 @@ fn a_stable_escalation_is_adopted_in_the_ledger_but_not_on_the_certificate() {
             "the certificate never leaves the recorded heuristic class in v0"
         );
     }
-    // The log records the adopted class, not the raw observation, so a
-    // replay cannot escalate behind the protocol's back.
-    let classes: Vec<&str> = [&first, &second]
+    // ADR 0007 Amendment P1: the payload carries inputs only. The
+    // recorded class is what the store observed and does not move; the
+    // observed class is what the probe saw. The adopted class — a
+    // *derived* value — never enters the log.
+    let checked: Vec<&freshdag_core::ir::IrEvent> = [&first, &second]
         .iter()
         .flat_map(|o| o.events.iter())
         .filter(|e| e.kind == EventKind::ProbeChecked)
+        .collect();
+    let recorded: Vec<&str> = checked
+        .iter()
         .map(|e| e.payload["trust_class"].as_str().expect("trust_class"))
         .collect();
     assert_eq!(
-        classes,
-        vec!["heuristic", "versioned"],
-        "first observation is pending; the second adopts (N=2)"
+        recorded,
+        vec!["heuristic", "heuristic"],
+        "probe.checked.trust_class is the class the STORE recorded; it is \
+         not the ledger's adopted class and does not move under escalation"
+    );
+    let observed: Vec<&str> = checked
+        .iter()
+        .map(|e| {
+            e.payload["observed_trust_class"]
+                .as_str()
+                .expect("observed_trust_class")
+        })
+        .collect();
+    assert_eq!(
+        observed,
+        vec!["versioned", "versioned"],
+        "the fold's input is preserved, so TrustLedger::replay can \
+         reconstruct the N=2 adoption from the log alone"
+    );
+
+    // The adoption is still auditable — as a diagnostic, which no fold
+    // over `probe.checked` consumes.
+    let escalation = [&first, &second]
+        .iter()
+        .flat_map(|o| o.events.iter())
+        .find(|e| {
+            e.kind == EventKind::Diagnostic && e.payload["message"] == "probe.trust_escalated"
+        })
+        .expect("the N=2 adoption surfaces as a diagnostic");
+    assert_eq!(escalation.payload["from_trust_class"], "heuristic");
+    assert_eq!(escalation.payload["to_trust_class"], "versioned");
+}
+
+/// The invariant-#5 half of ADR 0007 Amendment P1: feeding the engine's
+/// own emitted events back into the log must be a no-op on the derived
+/// graph, and must not raise any dependency's trust class.
+///
+/// While `probe.checked.trust_class` carried the ledger's *adopted*
+/// class, the second emission said `versioned` where the store had
+/// recorded `heuristic`. Replaying that log therefore disagreed with
+/// itself: `DerivedGraph` keeps the first observation and records an
+/// `EdgeConflict`, so the engine's own output poisoned the graph it was
+/// derived from — an artifact whose dependency provably did not change
+/// mid-computation reports as though it had. The fold was reading its
+/// own output back, which is exactly the non-idempotence invariant #5
+/// forbids.
+#[test]
+fn replaying_the_engines_own_events_is_a_no_op_on_the_graph() {
+    let fp = format!("blake3:{}", blake3_of("notes"));
+    let build = || {
+        Fixture::new("replay-escalate").with_probe_edge(
+            "https",
+            "acme.com/pricing",
+            &fp,
+            TrustClass::Heuristic,
+            None,
+        )
+    };
+    let probes = || {
+        let mut registry = ProbeRegistry::new();
+        registry
+            .register(Arc::new(ScriptedProbe::new("https").with_fallback(
+                ProbeResult::Match {
+                    observed_fp: fp.parse().expect("fingerprint"),
+                    observed_trust_class: TrustClass::Versioned,
+                },
+            )))
+            .expect("register");
+        registry
+    };
+
+    let engine = build().engine(probes());
+    let first = engine.check_ok();
+    // Two checks, so the ledger has passed N=2 and adopted `versioned`.
+    let second = engine.check_ok();
+    let mut log: Vec<freshdag_core::ir::IrEvent> = first.events.clone();
+    log.extend(second.events.clone());
+    assert!(
+        log.iter().any(|e| e.kind == EventKind::ProbeChecked),
+        "the engine emitted no probe.checked, so this test proves nothing"
+    );
+
+    let replayed = build().with_extra_events(log).engine(probes());
+    let outcome = replayed.check_ok();
+
+    for dep in &outcome.certificate.depends_on {
+        assert_eq!(
+            dep.trust_class,
+            TrustClass::Heuristic,
+            "replaying the engine's own events raised `{}` to {:?}",
+            dep.key,
+            dep.trust_class
+        );
+    }
+    assert!(
+        !outcome
+            .events
+            .iter()
+            .any(|e| e.payload.get("message") == Some(&"graph.edge_conflict".into())),
+        "the engine's own events disagree with the store's record of the \
+         same dependency, so replaying them fabricates an edge conflict"
+    );
+    assert_ne!(
+        outcome.certificate.status.value,
+        ValidityStatus::Valid,
+        "a heuristic edge can never reach valid, however the log is replayed"
     );
 }
 

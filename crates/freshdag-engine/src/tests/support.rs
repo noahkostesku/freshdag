@@ -77,6 +77,7 @@ pub struct Fixture {
     unregistered: bool,
     probe_producers: Vec<String>,
     artifact: ArtifactId,
+    extra: Vec<IrEvent>,
 }
 
 impl Fixture {
@@ -92,7 +93,19 @@ impl Fixture {
             unregistered: false,
             probe_producers: Vec::new(),
             artifact: ArtifactId(format!("blake3:{}", blake3_of(&format!("{name}/artifact")))),
+            extra: Vec::new(),
         }
+    }
+
+    /// Append already-built events to the log verbatim.
+    ///
+    /// For replaying the engine's own emissions: two fixtures built from
+    /// the same name share a computation id and an artifact id, so the
+    /// events one engine emitted are addressed to the computation the
+    /// next one evaluates.
+    pub fn with_extra_events(mut self, events: impl IntoIterator<Item = IrEvent>) -> Self {
+        self.extra.extend(events);
+        self
     }
 
     /// Replace the adapter's declared `emits` list.
@@ -267,6 +280,7 @@ impl Fixture {
             EventKind::ComputationEnded,
             serde_json::json!({ "status": "ok" }),
         );
+        events.extend(self.extra.iter().cloned());
         events
     }
 
