@@ -63,6 +63,12 @@ The contract's reasoning names `partial`; the implementation reads only
 
 ### Why the obvious fix is wrong
 
+> **Factually corrected by the 2026-08-16 Amendment.** The example below
+> is the contract's *illustrative* manifest, not the shipped observer's;
+> `crates/freshdag-observer/src/linux.rs` declares the opposite, and the
+> counterexample does not survive. The decision does; see Correction 2
+> for the argument that replaces this one.
+
 "Any `partial` note for a kind ⇒ cannot discharge" fails immediately.
 The reference Linux observer in `docs/contracts/observer-contract.md`
 declares:
@@ -120,9 +126,12 @@ conservative answer; a producer that deserves to discharge must now say
 so explicitly. Defaulting the other way would be the invariant-#7
 mistake this ADR exists to fix.
 
-Reclassifying the three manifests in-tree is the respective owners':
-the fsatrace observer's two notes are `over-approximates`; the Claude
-adapter's are `blind-in-scope`.
+Reclassifying the three manifests in-tree is the respective owners'.
+~~the fsatrace observer's two notes are `over-approximates`; the Claude
+adapter's are `blind-in-scope`.~~ **Withdrawn by the 2026-08-16
+Amendment, Correction 1** — factually wrong for fsatrace, and not this
+ADR's call in either case. Owners classify; this ADR supplies only the
+vocabulary and the fail-safe default.
 
 ### 2. `CoverageEntry` carries `partial`
 
@@ -144,8 +153,13 @@ blindness is not one.
 `has_fs_covered_observer` becomes:
 
 > An observer discharges a `bash`/`task` observation obligation only if
-> it declares `fs.read` coverage whose partial reason, if any, is
-> `over-approximates`.
+> it declares `fs.read` coverage and **every** `partial` entry whose
+> pattern matches `fs.read` carries the reason `over-approximates`.
+
+("every", not "the most specific" — added by the 2026-08-16 Amendment,
+Correction 4. `partial` is a conjunction of admissions; a narrow entry
+must not annotate away a broad one. Adding a `partial` entry can only
+ever make a producer discharge less.)
 
 Two corrections are folded in:
 
@@ -167,7 +181,10 @@ Two corrections are folded in:
 ## Consequences
 
 - The verifier's two-store test inverts: the blind observer's store
-  reports `unknown` with `coverage-deficit`, exit 2.
+  reports `unknown` with `coverage-deficit`, exit 2. **Amendment,
+  Correction 3:** so does the real one. No in-tree producer is known to
+  qualify as `over-approximates`, so `bash`-invoking computations on
+  Linux go non-`valid` after the migration.
 - Every producer's `partial` map must be reclassified. Three exist.
 - Certificates get wider. Acceptable; `known_limitations` already
   ships human-readable text for the same audience.
@@ -185,7 +202,10 @@ Two corrections are folded in:
 
 - **Treat any `partial` note as disqualifying.** Rejected: disqualifies
   the reference observer, so the rule would be inert or routinely
-  overridden.
+  overridden. ~~(Premise false — see Amendment, Correction 2.)~~ Still
+  rejected, on the replacement argument: it makes honest documentation
+  punitive, and it leaves `partial` free text, so the certificate
+  carries the fact of an admission without its direction.
 - **Leave `partial` free text and have the engine pattern-match the
   note.** Rejected outright — it is the free-text-reason-code mistake
   ADR 0006 was written to end, and invariant #13 requires public
@@ -197,3 +217,142 @@ Two corrections are folded in:
   reclassification work.** Rejected: a silent-wrong-answer generator on
   the invariant-#7 path, which is the same reasoning that made
   `CoverageManifest.role` deliberately have no serde default.
+
+---
+
+## Amendment, 2026-08-16 — the worked example was wrong
+
+Found by `core-engineer` while implementing this ADR, who correctly
+declined to act on its authority and escalated. Ruled by `architect` the
+same day. Appended, not rewritten: the decision stands in full. What
+follows corrects a factual claim in the reasoning and in
+§Decision 1's closing paragraph.
+
+**The error.** §Why the obvious fix is wrong argues that a blunt "any
+`partial` note ⇒ cannot discharge" rule fails because the reference
+Linux observer's notes are over-approximations, quoting *"mmap reads
+are pessimistic: hashed at mmap time"* from
+`docs/contracts/observer-contract.md`. §Decision 1 then concludes "the
+fsatrace observer's two notes are `over-approximates`."
+
+The shipped observer declares the opposite.
+`crates/freshdag-observer/src/linux.rs` publishes:
+
+- `fs.read` — "mmap reads bypass LD_PRELOAD interception and **are not
+  emitted** (observer-contract §Correctness Pitfalls #2); statically
+  linked or raw-syscall processes are invisible"
+- `fs.write` — "rename-atomic writes are emitted against the temporary
+  path only; the synthetic `fs.write` at the rename target required by
+  observer-contract §Required Behavior #3 **is not yet implemented**"
+
+Both are missing emissions, not pessimistic ones — the fail-unsafe
+direction, and the class this ADR exists to catch. The ADR quoted the
+contract's example manifest and treated it as a description of the
+crate. It is not one; see the second ruling below.
+
+**Correction 1.** §Decision 1's sentence "the fsatrace observer's two
+notes are `over-approximates`" is withdrawn. It states a conclusion
+this ADR has no standing to reach: classifying a producer's own notes
+is that producer's owner's call. `observer-engineer` classifies the
+fsatrace manifest, and `claude-adapter` its own, in the migration PR.
+No implementer may cite this ADR as authority for either
+classification.
+
+**Correction 2 — the motivating counterexample does not survive, and
+the decision does not depend on it.** If both fsatrace notes are
+under-approximating, then the blunt rule would not have disqualified a
+legitimate observer; it would have correctly disqualified a genuinely
+blind one, and §Rejected alternatives' first entry rests on a false
+premise. The decision is nevertheless unchanged, on two arguments that
+need no example:
+
+- **Invariant #13.** `partial` is prose where a machine decision is
+  required. That is true whatever any current producer declares, and it
+  is the whole of §Decision 2 — the certificate must carry the
+  *direction* of a producer's admission, not merely the fact that it
+  made one. A blunt rule leaves `partial` free text and leaves a
+  third-party rechecker with "there was a note."
+- **The blunt rule makes honesty punitive.** A producer that sees every
+  event but reports coarsely — directory-granular reads, a hash taken
+  at mmap time rather than at each fault — is strictly safer than one
+  that reports nothing, and under a blunt rule its only way to keep
+  discharging is to delete the note. An incentive to under-document is
+  the opposite of what a coverage manifest is for. This is the durable
+  form of the argument and replaces the withdrawn example.
+
+**Correction 3 — record the behavioural consequence honestly.**
+§Consequences says "the verifier's two-store test inverts." On the
+corrected facts, so does the real one: no in-tree producer is currently
+known to qualify as `over-approximates`, so the expected post-migration
+state is that **the fsatrace observer does not discharge a `bash`/`task`
+obligation either**, and `bash`-invoking computations on Linux go
+non-`valid`. That is a finding, not a regression — the observer cannot
+see mmap reads or statically linked processes, so it cannot answer the
+question the rule asks — but it is a much larger consequence than
+§Consequences records and it will be mistaken for a bug during W9.
+
+It follows that, on every manifest in the tree today, the closed
+vocabulary and the blunt rule produce identical verdicts. The
+vocabulary earns its keep as the certificate's machine-readable
+explanation (§Decision 2) and as headroom for a producer that
+legitimately over-approximates — not, today, as a behavioural
+difference. State that plainly rather than letting the next reader
+discover it and conclude the ADR was decorative.
+
+**Correction 4 — every matching entry must discharge.** Confirmed as
+proposed by the implementer, and promoted here from a test name
+(`a_specific_partial_entry_cannot_override_a_broader_blindness`) to
+normative text in §Decision 3. Where several `partial` patterns match
+an event kind, the obligation for that kind is discharged only if
+**every** matching entry's reason is `over-approximates`. Most-specific-
+wins is rejected.
+
+A coverage manifest is a conjunction of admissions, not a lookup table.
+Most-specific-wins is a *resolution* rule, appropriate where a later
+value replaces an earlier one; admissions do not replace each other.
+The Claude adapter carries both `fs.*` ("filesystem effects inside
+`bash` and `task` invocations are invisible to this adapter") and a
+narrower `fs.read`; under most-specific-wins the narrow entry would
+annotate away the broad admission, which is this ADR's own defect in a
+new shape — a machine-readable field whose meaning can be edited away
+by adding data. The property to preserve, and the one to test, is
+**monotonicity: adding a `partial` entry can only ever make a producer
+discharge less.**
+
+**Ruling 5 — a contract's reference manifest is illustrative, never
+descriptive.** The ambiguity that produced this error is now closed
+generally, because it will otherwise produce another one.
+
+Example payloads in `docs/contracts/` describe the *shape* a conformant
+producer must satisfy. They are not, and may not be read as, factual
+claims about anything in `crates/`. Consequences:
+
+- No ADR, engine branch, test, or review may cite a contract's example
+  manifest as evidence of what an in-tree producer declares. Cite the
+  source file.
+- Where a shipped producer and the example diverge, the divergence is a
+  conformance gap in the producer, not a contradiction in the contract.
+  `observer-contract.md §Correctness Pitfalls #2` ("Hash at mmap time;
+  document pessimism") is a **requirement on implementers**, and the
+  example manifest shows an observer that has met it. `linux.rs` has
+  not; its `partial` note is the honest declaration of that gap, and it
+  cites Pitfall #2 as the requirement it is failing. Read that way the
+  two are consistent and no reconciliation of the contract's text is
+  needed — only a label.
+- The proximate cause was that the contract's example uses `"producer":
+  "freshdag-observer-fsatrace"`, the same string `linux.rs` emits, which
+  invites exactly the substitution made here. `observer-engineer` owns
+  `observer-contract.md` and should rename the example producer to
+  something unmistakably illustrative and add an explicit
+  "illustrative, not a description of any shipped observer" banner
+  above it. Same edit applies to every example manifest in
+  `docs/contracts/`. `architect` does not make those edits here.
+
+**Open, escalated to the human, not decided:** `under-approximates`
+currently collapses "misses mmap reads" and "misses everything" into
+one non-discharging bucket. That is the conservative choice and
+invariant #15 supports it, but if the fsatrace gap is later closed to a
+narrow, bounded under-approximation, the vocabulary has no way to say
+so and the observer still cannot discharge. Whether a bounded/scoped
+under-approximation deserves a fourth member is a real question and
+deliberately out of scope here.

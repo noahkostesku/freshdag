@@ -216,3 +216,103 @@ Separately noted for the implementer: `engine.rs:350-363` places this
 licensed verdict in the `Err(no_probe)` arm of arbitration, which
 `ARCHITECTURE.md §7` now forbids. The code motion is already dispatched
 by the `release-manager` and is not re-litigated here.
+
+---
+
+## Amendment 2, 2026-08-16 — the TTL gate precedes arbitration; the verdict does not
+
+Raised by the `release-manager` holding the implementation of Amendment
+1, ruled by `architect` the same day. Appended rather than superseding:
+the decision and Amendment 1 stand unchanged and this disambiguates the
+sentence that produced a defect while repairing one.
+
+**What happened.** Amendment 1 closed with "the code motion is already
+dispatched and is not re-litigated here," and `ARCHITECTURE.md §7`
+required the volatile rule be "a positive branch keyed on trust class,
+before probe arbitration." The implementer read that as *the volatile
+edge is decided in full before any probe is considered*, and returned
+for every `Volatile` dependency ahead of probe removal, arbitration and
+dispatch. The scheme-dependence is gone and every TTL guard from
+Amendment 1 landed with tests. But a probe that would have reported
+`Drift` on a volatile edge is now never consulted, so `Stale` becomes
+`LikelyValid`.
+
+This is not hypothetical. `crates/freshdag-probes/src/https.rs`
+classifies `Cache-Control: no-store` / `must-revalidate` as `volatile`
+and returns `ProbeResult::Drift` from five sites, none conditioned on
+trust class. A `no-store` resource whose `ETag` demonstrably moved would
+report `likely-valid` and reach exit 0 under `--accept-likely-valid`.
+Pre-fix `main`, defect and all, reports `stale` on that input: the
+repair would have made drift detection strictly worse than the defect.
+
+**Ruling: the ordering requirement scopes the TTL gate only. A
+`volatile` edge inside a validated TTL is still probed, and a probe's
+`Drift` still makes it `Stale`.**
+
+The proposed shape is accepted as written:
+
+1. The TTL gate stays positive and pre-arbitration. Absent,
+   unrepresentable, over-`max_volatile_ttl`, future-timestamped or
+   elapsed → `Unknown`, short-circuit, no probe consulted.
+2. Inside the TTL, arbitration and dispatch proceed. `Drift` → `Stale`.
+   `Match`, probe `Unknown`, arbitration tie, or no probe registered →
+   `Match` at `Volatile`, capped at `LikelyValid`.
+
+The gate alone fully discharges what Amendment 1 was about. The
+objection there was that *registering an unrelated probe silently
+flipped `likely-valid` → `unknown` on absent evidence* — the verdict
+turned on which scheme happened to have a probe. Under this shape
+registering a probe can only flip `likely-valid` → `stale`, and only on
+positive drift evidence. More evidence yielding a stricter answer is
+the direction invariants #7 and #15 want. Absence of a probe yielding a
+stricter answer is not, which is why step 2 lands probe `Unknown` and
+"no probe registered" on the same verdict: `Unknown` from a probe is
+the absence of evidence, and the TTL — already validated in step 1 — is
+the evidence that remains in both cases. Had step 2 mapped probe
+`Unknown` to edge `Unknown`, the verifier's exact reproduction would
+return: `web.search://` unprobed at `likely-valid`, `file:///` probed-
+and-undecided at `unknown`, same class, same TTL, same absent resource.
+
+`ARCHITECTURE.md §7` is amended in the same change to say this in the
+normative text, since the phrase "before probe arbitration" is what
+produced the misreading and would produce it again.
+
+**On this ADR's own evidence.** Decision item 2 narrows
+`TrustClassVolatileCapsAtLikelyValid` to "a probe ran, matched, and the
+recorded class caps the result." Under the as-implemented shape that
+code has no producer at all — no volatile edge reaches dispatch, and
+the arm is dead. An ADR that defines a reason code by *a probe having
+run and matched on a volatile edge* cannot coherently be read as
+forbidding probes on volatile edges. The release-manager's reading is
+correct and is now the record: this ADR assumed volatile edges are
+probed, and the shape above restores the code's producer.
+
+**Sequencing of the reason-code split.** `volatile-within-ttl-unprobed`
+has no `ReasonCode` variant yet; adding it is a `freshdag-core` plus
+two-schema `contract-change` PR. Both volatile arms therefore still pin
+`trust-class-volatile-caps-at-likely-valid`, and Amendment 1 item 3's
+exit-code floor is not yet implementable. This does **not** gate the
+engine fix. The two changes repair different things — the fix removes a
+path that reports `likely-valid` on observed drift, the split makes an
+existing `likely-valid` legible — and holding a correctness fix behind
+a vocabulary change would leave the worse behaviour in `main` for the
+duration. Land in this order:
+
+1. The engine fix, with both arms pinning the existing code. No
+   reason-code or schema change; not a `contract-change` PR.
+2. The ADR 0009 `contract-change` PR: both new codes, both schemas, the
+   fixtures named in §Consequences and Amendment 1 item 4, and the
+   `--accept-likely-valid` floor.
+
+Until (2) lands, `--accept-likely-valid` accepts a never-probed
+volatile edge. That is a known open hole with a named owner, recorded
+in `docs/BUILD_PLAN.md`, not an accepted behaviour.
+
+**Consequence for the probe contract.** §Trust-class Semantics says a
+probe handed a `volatile` recorded class should "return `Unknown` if
+the TTL has expired; `Match` inside TTL." Read literally that forbids
+the `Drift` the `https://` probe already returns and this ruling now
+depends on. The clause was written for probes *whose only signal is the
+TTL* and needs to permit `Drift` where a probe holds a comparable
+validator despite a `volatile` classification. `probe-engineer` owns
+that edit; `architect` does not make it here.

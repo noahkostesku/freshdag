@@ -250,6 +250,23 @@ Owner: `core-engineer` (types, schema) with `store-engineer`
 (`SilenceMeaning` becomes the single implementation),
 `observer-engineer` and `claude-adapter` (reclassify their manifests).
 
+**Expect the fsatrace observer to stop discharging too** (ADR 0011,
+Amendment, Correction 3). Its shipped `fs.read` note is an
+under-approximation — mmap reads are not emitted; statically linked
+processes are invisible — so `bash`-invoking computations on Linux go
+non-`valid` after the migration. That is the correct answer, not a
+regression, and W9 must not be graded as broken for producing it.
+
+**W9.1. The volatile reason-code split** (`core-engineer`, blocking on
+nothing, but blocked *by* the volatile engine fix landing first).
+ADR 0009's two reason codes, both schema enums, the fixtures in its
+§Consequences and Amendment 1 item 4, and the `--accept-likely-valid`
+floor. Until this lands, `--accept-likely-valid` accepts a never-probed
+volatile edge — a known open hole, not accepted behaviour. Sequence it
+after the ADR 0009 Amendment 2 engine fix (which is not a contract
+change) and before the ADR 0011 engine migration, since both touch
+`evaluate_edge`.
+
 ### What it costs
 
 Small in code, and mostly work already owed. Three workstreams, all
@@ -356,6 +373,19 @@ edits.
   `docs/EVALUATION.md §2`'s backlog are the ones most likely to expose
   it. When it lands it is a **newtype whose constructor is the single
   canonicalization point**, never a scheme enum.
+
+- **Drift observations surviving probe removal.** Opened 2026-08-16 by
+  `architect` while ruling ADR 0009 Amendment 2. A `volatile` edge whose
+  probe reported `Drift` and whose probe is then uninstalled falls back
+  to `likely-valid`, because probe removal is `Unknown` per
+  `docs/contracts/probe-contract.md §Anti-thrash` and the TTL floor then
+  licenses `likely-valid` on its own. A recorded `probe.checked` with
+  result `drift` is a durable fact about the world; it arguably should
+  outlive the probe that observed it. Consuming prior drift observations
+  is a store-projection design (`store-engineer` + `graph-engineer`),
+  not an evaluation-order tweak, and is out of scope for the volatile
+  fix. Only `volatile` is affected — every other class falls to
+  `unknown`, not to a floor.
 
 - **Folding `freshdag-store` into `freshdag-engine`.** Rejected
   2026-08-16 by `architect`; see `ARCHITECTURE.md §4`. Not reopened

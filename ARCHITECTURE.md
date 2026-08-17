@@ -273,8 +273,10 @@ proceeds edge-by-edge:
    - `versioned` + `Match` → `Valid`.
    - `heuristic` + `Match` → `Likely Valid` (never a bare `Valid`).
    - `volatile` inside TTL → `Likely Valid`, **whether or not a probe
-     ran** (see below); outside TTL → `Unknown`.
-   - Any trust class + `Unknown` → `Unknown`.
+     ran** (see below); outside TTL → `Unknown`. A `volatile` edge whose
+     probe returns `Drift` is `Stale`, like every other class.
+   - Any trust class + `Unknown` → `Unknown`, **except** `volatile`
+     inside a validated TTL, which stays `Likely Valid` (see below).
 
 **The `volatile` row does not presuppose a probe.** Every other row of
 that table is `<trust class> + <probe result>`; the `volatile` row names
@@ -297,10 +299,72 @@ This is the **only** place in FreshDAG where "no probe ran" is not
 machine-readable output rather than in prose: an unprobed volatile edge
 inside its TTL carries `volatile-within-ttl-unprobed`, distinct from the
 probed case's `trust-class-volatile-caps-at-likely-valid` (ADR 0009).
-Implementations must evaluate this rule as a positive branch keyed on
-trust class, before probe arbitration — never as a fallback in an
-arbitration-failure path, where registering an unrelated probe for the
-scheme would silently change the verdict.
+Implementations must evaluate the **TTL gate** as a positive branch
+keyed on trust class, before probe arbitration — never as a fallback in
+an arbitration-failure path, where registering an unrelated probe for
+the scheme would silently change the verdict.
+
+**"Before probe arbitration" scopes the TTL gate, not the verdict**
+(disambiguated 2026-08-16 after the first implementation read it as the
+latter; ADR 0009, Amendment 2). A `volatile` edge is evaluated in three
+ordered steps, and only the first is pre-arbitration:
+
+1. **TTL gate — positive, pre-arbitration, short-circuits only
+   downward.** If the trust class is `volatile` and the declared TTL is
+   absent, unrepresentable, longer than `max_volatile_ttl`, measured
+   from an `observed_at` in the future beyond skew tolerance, or
+   elapsed, the edge is `Unknown` and no probe is consulted. This is
+   the whole of what must precede arbitration, and it is sufficient to
+   remove the scheme-dependence the gate was added for: every negative
+   outcome is a function of the recorded dependency alone, so it cannot
+   turn on which schemes happen to have probes.
+2. **Passing the gate does not decide the edge.** It establishes only
+   that the declared lifetime is bounded, real, and open. Probe
+   removal, arbitration, and dispatch then proceed normally.
+3. **Resolution.** `Drift` → the edge is `Drift`, and the artifact is
+   `Stale`. Every other outcome — `Match`, probe `Unknown`, no probe
+   registered for the scheme, arbitration tie — is `Match` capped at
+   `Likely Valid`, carrying `trust-class-volatile-caps-at-likely-valid`
+   where a probe ran and matched and `volatile-within-ttl-unprobed`
+   otherwise.
+
+**The invariant this expresses: inside a validated TTL, a probe may
+only make a `volatile` verdict stricter.** The baseline is `Likely
+Valid`, licensed by the declared TTL; a probe result can lower it to
+`Stale` and can do nothing else. It cannot raise it (the cap holds) and
+it cannot lower it to `Unknown` (`Unknown` is less information than the
+TTL already supplies, and §7 gives the TTL standing as evidence). The
+verdict is therefore a function of the recorded edge and, at most, one
+bit of positive drift evidence — which is what makes it
+scheme-independent.
+
+**A `volatile` dependency can reach `Stale`.** The aggregation rule
+below has never carved out a trust class from `Any Drift → Stale`, and
+this section does not add one. Trust classes bound how strongly
+FreshDAG may assert that something is *unchanged*; they say nothing
+about its ability to observe that something *changed*. `volatile` means
+"no trustworthy signal that this is the same", not "no signal at all":
+the `https://` probe classifies `Cache-Control: no-store` as `volatile`
+while still holding a comparable `ETag`, `Last-Modified`, or content
+hash, so a `no-store` resource that demonstrably changed is observably
+`Drift`. Discarding that observation to preserve `Likely Valid` would
+report a verdict stronger than the evidence supports — the same harm
+invariant #7 names, arriving from the opposite direction — and
+invariant #15 settles it: correctness beats cache hit rate. The §7
+rationale "there is nothing a probe could compare against" is a claim
+about the general case (`time.now()`, `web.search(...)`) and is the
+reason no probe is *required*; it is not a licence to ignore one that
+answered.
+
+Known remainder, deliberately not closed here: a probe that previously
+reported `Drift` and is then uninstalled leaves the edge at `Likely
+Valid`, because probe removal is `Unknown` per
+`docs/contracts/probe-contract.md §Anti-thrash` and step 3 does not
+override it. A recorded `probe.checked` with result `drift` is a
+durable fact about the world that arguably should outlive the probe
+that observed it. Consuming prior drift observations from the log is a
+store-projection question, not an evaluation-order one; it is tracked
+in `docs/BUILD_PLAN.md §7` rather than decided in this section.
 
 **A declared TTL is evidence only where it is bounded and its timestamp
 is real.** The argument above holds because the producer asserted a
