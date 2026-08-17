@@ -190,7 +190,7 @@ impl fmt::Display for PartialReason {
 /// [`PartialReason`] plus a non-normative human note.
 ///
 /// This mirrors [`ValidityReason`](crate::dependency::ValidityReason)'s
-/// `reason` + `detail` split, and OpenVEX's `justification` +
+/// `reason` + `detail` split, and `OpenVEX`'s `justification` +
 /// `impact_statement` (`docs/NOVELTY.md §1`), and carries the same
 /// rules for the free-text half:
 ///

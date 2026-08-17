@@ -102,6 +102,32 @@
           "version":             { "type": "string" },
           "role":                { "description": "Vantage point this producer observes from. Only 'observer' can discharge the bash/task coverage obligation; adapters are blind inside subprocesses by construction.", "enum": ["adapter", "observer", "probe"] },
           "emits":               { "description": "Event-kind patterns this producer declares it emits; mirrors CoverageEntry.emits. Required for the coverage-deficit rule to be checkable from the certificate alone.", "type": "array", "items": { "type": "string" } },
+          "partial": {
+            "description": "Event-kind patterns this producer emits only partially, mirroring CoverageEntry.partial. Present on the certificate so a third party can re-check the coverage-deficit rule without the store: an entry whose reason is 'under-approximates' or 'blind-in-scope' does NOT discharge an observation obligation for that kind. Each value is either a {reason, note} object or, for pre-ADR-0011 producers, a bare note string, which is read as 'under-approximates'.",
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "description": "Legacy shape (pre-ADR-0011): a bare human-readable note. Read as reason 'under-approximates', because a producer that cannot state its direction of error must get the conservative answer.",
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "required": ["reason"],
+                  "properties": {
+                    "reason": {
+                      "description": "Which direction this producer's coverage of the kind errs in. Machine-readable; the only field consumers may decide on. REQUIRED — no default, for the same reason `role` has none.",
+                      "enum": ["blind-in-scope", "over-approximates", "under-approximates"]
+                    },
+                    "note": {
+                      "description": "Human-readable explanation. NON-NORMATIVE: no consumer may branch on it. MUST be deterministic (it is inside the cert_id preimage) and MUST NOT carry secrets.",
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            }
+          },
           "known_limitations":   { "type": "array", "items": { "type": "string" } }
         }
       }

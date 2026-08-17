@@ -5,6 +5,8 @@
 //! `Certificate::check_invariants`, schema examples matching the
 //! certificate schema.
 
+use std::collections::BTreeMap;
+
 use time::OffsetDateTime;
 
 use crate::artifact::{Artifact, ArtifactId};
@@ -18,7 +20,10 @@ use crate::dependency::{
     FingerprintParseError, ReasonCode, TrustClass, Validity, ValidityAggregationError,
     ValidityReason, ValidityStatus,
 };
-use crate::ir::{Hash, HashAlgo, ProducerRole};
+use crate::ir::{
+    EventKind, EventKindPattern, Hash, HashAlgo, PartialCoverage, PartialReason, ProducerRole,
+    ALL_PARTIAL_REASONS,
+};
 
 // --------------------------------------------------------------------
 // helpers
@@ -607,6 +612,63 @@ fn schema_reason_enums_match_rust() {
 }
 
 #[test]
+fn schema_partial_reason_enum_matches_rust() {
+    // Same guard as `schema_reason_enums_match_rust`, one layer down:
+    // a `PartialReason` variant that exists in Rust but not in the
+    // schema (or vice versa) means a producer and a third-party
+    // re-checker disagree about whether a certificate is readable.
+    let mut rust: Vec<String> = ALL_PARTIAL_REASONS
+        .iter()
+        .map(|r| r.as_wire_str().to_string())
+        .collect();
+    rust.sort();
+    rust.dedup();
+    assert_eq!(rust.len(), ALL_PARTIAL_REASONS.len());
+
+    let cert = read_schema("schemas/certificate/v0.1.json");
+    assert_eq!(
+        schema_enum_at(
+            &cert,
+            "/properties/observation_coverage/items/properties/partial/\
+             additionalProperties/oneOf/1/properties/reason/enum"
+        ),
+        rust,
+        "certificate schema `observation_coverage[].partial.*.reason` enum \
+         disagrees with PartialReason"
+    );
+}
+
+#[test]
+fn certificate_schema_accepts_the_legacy_bare_string_partial() {
+    // The migration shape must stay expressible in the schema, or old
+    // certificates become unreadable rather than conservatively read.
+    let cert = read_schema("schemas/certificate/v0.1.json");
+    let one_of = cert
+        .pointer(
+            "/properties/observation_coverage/items/properties/partial/additionalProperties/oneOf",
+        )
+        .and_then(serde_json::Value::as_array)
+        .expect("partial.additionalProperties.oneOf");
+    assert_eq!(one_of.len(), 2);
+    assert_eq!(
+        one_of[0].pointer("/type").and_then(|v| v.as_str()),
+        Some("string")
+    );
+    assert_eq!(
+        one_of[1].pointer("/type").and_then(|v| v.as_str()),
+        Some("object")
+    );
+
+    // `reason` is required in the object form; `note` is not.
+    let required = one_of[1]
+        .pointer("/required")
+        .and_then(serde_json::Value::as_array)
+        .expect("object form required list");
+    let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(required, vec!["reason"]);
+}
+
+#[test]
 fn certificate_schema_declares_detail_and_emits() {
     // Regression guards for the two properties this wave added to the
     // schema to close pre-existing Rust/schema drift.
@@ -918,6 +980,7 @@ fn valid_baseline_cert() -> Certificate {
             version: "0.1.0".to_string(),
             role: ProducerRole::Adapter,
             emits: vec![],
+            partial: BTreeMap::new(),
             known_limitations: vec![],
         }],
     }
@@ -1122,6 +1185,7 @@ fn fs_entry(producer: &str, role: ProducerRole) -> CoverageEntry {
             crate::ir::EventKindPattern::from("fs.read"),
             crate::ir::EventKindPattern::from("fs.write"),
         ],
+        partial: BTreeMap::new(),
         known_limitations: vec![],
     }
 }
@@ -1158,6 +1222,7 @@ fn coverage_deficit_adapter_fs_claim_does_not_discharge_bash_obligation() {
             version: "0.1.0".to_string(),
             role: ProducerRole::Observer,
             emits: vec![], // StubObserver: declares nothing.
+            partial: BTreeMap::new(),
             known_limitations: vec![],
         },
     ];
@@ -1182,6 +1247,129 @@ fn coverage_deficit_observer_discharges_even_alongside_adapter_fs_claim() {
     cert.check_coverage_deficit(&events).unwrap();
 }
 
+// --------------------------------------------------------------------
+// ADR 0011 — the certificate carries `partial`, and the discharge rule
+// reads it. Each of these is a certificate that used to say `valid`.
+// --------------------------------------------------------------------
+
+#[test]
+fn coverage_entry_carries_partial_from_the_manifest() {
+    // `From<&CoverageManifest>` used to drop `partial`, which made the
+    // coverage-deficit rule uncheckable from the certificate alone: the
+    // one fact that flips the verdict was not in the document.
+    let mut partial = BTreeMap::new();
+    partial.insert(
+        "fs.read".to_string(),
+        PartialCoverage::new(PartialReason::BlindInScope, "no subprocess visibility"),
+    );
+    let manifest = crate::ir::CoverageManifest {
+        producer: "freshdag-observer-blind".to_string(),
+        version: "0.1.0".to_string(),
+        role: ProducerRole::Observer,
+        platforms: vec![],
+        emits: vec![EventKindPattern::from("fs.read")],
+        partial,
+        capabilities: BTreeMap::new(),
+        known_limitations: vec![],
+    };
+    let entry = CoverageEntry::from(&manifest);
+    assert_eq!(entry.partial, manifest.partial);
+
+    // And it survives the wire, so a third party re-checking the
+    // certificate on another machine reaches the same verdict.
+    let json = serde_json::to_string(&entry).unwrap();
+    let back: CoverageEntry = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, entry);
+    assert!(!back.discharges_subprocess_obligation());
+}
+
+#[test]
+fn coverage_deficit_blind_observer_does_not_discharge_bash_obligation() {
+    // The verifier's reproduction (ADR 0011 §Context): two stores
+    // identical except the observer's `partial` map both returned
+    // "safe to reuse". An observer that declares itself blind to
+    // subprocess reads must not discharge the obligation, or `role` is
+    // a formality.
+    for blind in [
+        PartialReason::BlindInScope,
+        PartialReason::UnderApproximates,
+    ] {
+        let mut cert = valid_baseline_cert();
+        let mut entry = fs_entry("freshdag-observer-fsatrace", ProducerRole::Observer);
+        entry.partial.insert(
+            "fs.read".to_string(),
+            PartialCoverage::new(blind, "cannot see reads inside subprocesses"),
+        );
+        cert.observation_coverage.push(entry);
+        let events = vec![bash_tool_invoked_event("freshdag-adapter-claude")];
+        let err = cert.check_coverage_deficit(&events).unwrap_err();
+        assert!(
+            matches!(err, InvariantError::CoverageDeficit { .. }),
+            "{blind} must not discharge, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn coverage_deficit_over_approximating_observer_still_discharges() {
+    // The other half of the rule, and the reason "any partial note
+    // disqualifies" was rejected: the only real observer we have
+    // carries partial notes. Over-approximation costs spurious
+    // staleness (invariant #15's explicit preference), never spurious
+    // freshness.
+    let mut cert = valid_baseline_cert();
+    let mut entry = fs_entry("freshdag-observer-fsatrace", ProducerRole::Observer);
+    entry.partial.insert(
+        "fs.read".to_string(),
+        PartialCoverage::new(
+            PartialReason::OverApproximates,
+            "mmap reads are pessimistic: hashed at mmap time",
+        ),
+    );
+    cert.observation_coverage.push(entry);
+    let events = vec![bash_tool_invoked_event("freshdag-adapter-claude")];
+    cert.check_coverage_deficit(&events).unwrap();
+}
+
+#[test]
+fn coverage_deficit_fs_write_only_observer_does_not_discharge() {
+    // Validity is about *inputs*. The predicate was
+    // `covers(FsRead) || covers(FsWrite)`, so an observer that sees
+    // only writes — and therefore contributes zero dependency edges —
+    // discharged a bash obligation.
+    let mut cert = valid_baseline_cert();
+    cert.observation_coverage.push(CoverageEntry {
+        producer: "freshdag-observer-writes-only".to_string(),
+        version: "0.1.0".to_string(),
+        role: ProducerRole::Observer,
+        emits: vec![EventKindPattern::from("fs.write")],
+        partial: BTreeMap::new(),
+        known_limitations: vec![],
+    });
+    let events = vec![bash_tool_invoked_event("freshdag-adapter-claude")];
+    let err = cert.check_coverage_deficit(&events).unwrap_err();
+    assert!(matches!(err, InvariantError::CoverageDeficit { .. }));
+}
+
+#[test]
+fn coverage_entry_covers_stays_syntactic_while_discharges_reads_partial() {
+    // The two predicates answer different questions on purpose. ADR
+    // 0011 exists because `covers`'s doc said `partial` was "a separate
+    // consumer-side signal" and no consumer consulted it; quietly
+    // widening `covers` would have changed every existing call site's
+    // meaning with no compiler help.
+    let mut entry = fs_entry("freshdag-observer-fsatrace", ProducerRole::Observer);
+    entry.partial.insert(
+        "fs.read".to_string(),
+        PartialCoverage::new(PartialReason::BlindInScope, "blind"),
+    );
+    assert!(entry.covers(EventKind::FsRead));
+    assert!(!entry.discharges(EventKind::FsRead));
+    // fs.write is untouched by an fs.read declaration.
+    assert!(entry.discharges(EventKind::FsWrite));
+    assert!(!entry.discharges_subprocess_obligation());
+}
+
 #[test]
 fn coverage_deficit_probe_role_does_not_discharge_bash_obligation() {
     // A probe reports external-state freshness; it has no vantage point
@@ -1193,6 +1381,7 @@ fn coverage_deficit_probe_role_does_not_discharge_bash_obligation() {
             version: "0.1.0".to_string(),
             role: ProducerRole::Adapter,
             emits: vec![],
+            partial: BTreeMap::new(),
             known_limitations: vec![],
         },
         fs_entry("freshdag-probe-file", ProducerRole::Probe),

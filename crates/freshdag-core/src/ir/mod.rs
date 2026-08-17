@@ -35,8 +35,8 @@ mod payload;
 
 pub(crate) use coverage::declares_dischargeable;
 pub use coverage::{
-    ALL_PARTIAL_REASONS, CoverageManifest, EventKindPattern, PartialCoverage, PartialReason,
-    ProducerRole,
+    CoverageManifest, EventKindPattern, PartialCoverage, PartialReason, ProducerRole,
+    ALL_PARTIAL_REASONS,
 };
 pub use envelope::IrEvent;
 pub use hash::{Hash, HashAlgo, HashParseError};
