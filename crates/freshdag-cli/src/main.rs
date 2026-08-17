@@ -8,6 +8,7 @@
 
 mod check;
 mod exit;
+mod mark;
 mod render;
 
 use std::path::PathBuf;
@@ -39,6 +40,8 @@ struct Cli {
 enum Command {
     /// Probe an artifact's dependencies and report its validity.
     Check(CheckArgs),
+    /// Declare that a file the store recorded writing is an artifact.
+    Mark(MarkArgs),
     /// Explain why an artifact is stale.
     Why {
         /// Artifact id or path.
@@ -53,6 +56,22 @@ enum Command {
     Graph,
     /// Watch for dependency changes.
     Watch,
+}
+
+#[derive(Debug, Args)]
+struct MarkArgs {
+    /// Path to the file to record as an artifact.
+    path: String,
+
+    /// Store root holding the canonical observation log.
+    #[arg(long, default_value = DEFAULT_STORE, value_name = "DIR")]
+    store: PathBuf,
+
+    /// Media type to record for the artifact. Guessed from the file
+    /// extension when omitted. Advisory only: no validity decision
+    /// reads it.
+    #[arg(long, value_name = "MEDIA_TYPE")]
+    kind: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -102,6 +121,7 @@ fn run() -> i32 {
 
     let exit = match cli.command {
         Some(Command::Check(args)) => check_command(&args),
+        Some(Command::Mark(args)) => mark_command(&args),
         Some(Command::Why { artifact }) => unimplemented_command("why", Some(&artifact)),
         Some(Command::Cert { artifact }) => unimplemented_command("cert", Some(&artifact)),
         Some(Command::Graph) => unimplemented_command("graph", None),
@@ -146,6 +166,21 @@ fn check_command(args: &CheckArgs) -> Exit {
     }
 
     exit
+}
+
+fn mark_command(args: &MarkArgs) -> Exit {
+    match mark::run(&args.store, &args.path, args.kind.as_deref()) {
+        Ok(marked) => {
+            println!("marked {}", marked.path.display());
+            println!("  artifact    {}", marked.artifact);
+            println!("  computation {}", marked.computation);
+            Exit::Valid
+        }
+        Err(err) => {
+            eprintln!("freshdag mark: {err}");
+            err.exit()
+        }
+    }
 }
 
 fn unimplemented_command(name: &str, artifact: Option<&str>) -> Exit {

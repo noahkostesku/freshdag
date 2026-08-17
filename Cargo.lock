@@ -357,6 +357,7 @@ dependencies = [
 name = "freshdag-cli"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "clap",
  "freshdag-core",
  "freshdag-engine",
