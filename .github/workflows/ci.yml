@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+  # Deliberately unfiltered: CI must run on a pull request whatever it
+  # targets. With `branches: [main]` a PR based on anything else — an
+  # integration branch, a stacked PR onto another feature branch — got
+  # no checks at all, and `gh pr checks` reported "no checks reported"
+  # rather than a failure, so an unverified PR looked the same as one
+  # nobody had pushed yet. "Do not merge red" (CLAUDE.md) is unenforceable
+  # when the honest state is "never ran".
   pull_request:
-    branches: [main]
   workflow_dispatch: {}
 
 concurrency:
