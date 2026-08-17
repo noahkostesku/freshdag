@@ -9,6 +9,8 @@
 //! Rust-level assertions redundant with the schema's `allOf if/then`
 //! rules. Both must hold; both must agree.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -16,7 +18,9 @@ use time::OffsetDateTime;
 use crate::artifact::Artifact;
 use crate::computation::ComputationId;
 use crate::dependency::{Dependency, ReasonCode, TrustClass, ValidityReason, ValidityStatus};
-use crate::ir::{CoverageManifest, EventKind, EventKindPattern, Hash, IrEvent, ProducerRole};
+use crate::ir::{
+    CoverageManifest, EventKind, EventKindPattern, Hash, IrEvent, PartialCoverage, ProducerRole,
+};
 
 /// Schema identifier expected on every v0.1 certificate.
 pub const CERTIFICATE_SCHEMA_V0_1: &str = "freshdag.certificate/v0.1";
@@ -122,6 +126,26 @@ pub struct CoverageEntry {
     /// the certificate + event stream alone.
     #[serde(default)]
     pub emits: Vec<EventKindPattern>,
+    /// Kinds this producer emits only partially, mirroring
+    /// [`CoverageManifest::partial`].
+    ///
+    /// Carried for the same reason as `emits`, and more forcefully: a
+    /// certificate that omits its producers' declared blindness cannot
+    /// be re-checked by a third party, because the one fact that would
+    /// flip the verdict is not in the document. `docs/NOVELTY.md §2`
+    /// rests the wedge on the certificate being a portable artifact
+    /// someone else can re-check without our store; a certificate that
+    /// hides the producer's own admission of blindness is not one.
+    ///
+    /// Absent means "this producer declared no partial coverage" — the
+    /// same thing an empty map means. Note this is NOT the fail-safe
+    /// direction, and it cannot be: there is no third state to decode
+    /// into. Certificates written before ADR 0011 therefore re-check as
+    /// though their producers were fully faithful. That is a bounded,
+    /// one-time exposure on pre-existing documents, not a live path —
+    /// every producer writing a certificate today emits this field.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub partial: BTreeMap<String, PartialCoverage>,
     /// Human-readable known limitations that surface to end users.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub known_limitations: Vec<String>,
@@ -134,16 +158,57 @@ impl From<&CoverageManifest> for CoverageEntry {
             version: m.version.clone(),
             role: m.role,
             emits: m.emits.clone(),
+            partial: m.partial.clone(),
             known_limitations: m.known_limitations.clone(),
         }
     }
 }
 
 impl CoverageEntry {
-    /// Does this coverage entry declare it emits the given event kind?
+    /// Does this coverage entry **syntactically** declare it emits the
+    /// given event kind?
+    ///
+    /// Purely syntactic, ignoring `partial` — mirrors
+    /// [`CoverageManifest::covers`], including the warning there. To
+    /// decide whether a silence can be trusted, use
+    /// [`CoverageEntry::discharges`].
     #[must_use]
     pub fn covers(&self, kind: EventKind) -> bool {
         self.emits.iter().any(|p| p.matches(kind))
+    }
+
+    /// Does this producer discharge an observation obligation for the
+    /// given event kind (ADR 0011 §3)?
+    ///
+    /// Shares its implementation with [`CoverageManifest::discharges`],
+    /// so the manifest-side and certificate-side answers cannot
+    /// diverge.
+    #[must_use]
+    pub fn discharges(&self, kind: EventKind) -> bool {
+        crate::ir::declares_dischargeable(&self.emits, &self.partial, kind)
+    }
+
+    /// Does this producer discharge the observation obligation created
+    /// by a `bash`/`task` tool invocation?
+    ///
+    /// True iff it is an [`Observer`](ProducerRole::Observer) **and**
+    /// it discharges [`EventKind::FsRead`].
+    ///
+    /// The kind is fixed at `fs.read` on purpose, and this method
+    /// exists so no caller can spell the rule any other way. Two errors
+    /// are unrepresentable through it:
+    ///
+    /// - **`fs.write` cannot substitute for `fs.read`.** Validity is
+    ///   about *inputs*. A producer that sees only writes observes zero
+    ///   dependencies, so `covers(FsRead) || covers(FsWrite)` — the
+    ///   shape this replaces — discharged the obligation for a producer
+    ///   incapable of contributing a single edge.
+    /// - **A disjunction over kinds cannot be expressed.** The caller
+    ///   does not supply a kind at all, so it cannot widen the rule by
+    ///   OR-ing in a second one.
+    #[must_use]
+    pub fn discharges_subprocess_obligation(&self) -> bool {
+        matches!(self.role, ProducerRole::Observer) && self.discharges(EventKind::FsRead)
     }
 }
 
@@ -154,13 +219,14 @@ pub enum InvariantError {
     /// Schema field didn't match the expected string for this version.
     #[error("schema field is `{0}`; expected `{CERTIFICATE_SCHEMA_V0_1}`")]
     SchemaMismatch(String),
-    /// A computation invoked `bash` or `task` but no observer producer
-    /// in `observation_coverage` declares fs.* coverage. Per
+    /// A computation invoked `bash` or `task` but no producer in
+    /// `observation_coverage` discharges the obligation (see
+    /// [`CoverageEntry::discharges_subprocess_obligation`]). Per
     /// certificate-contract §Coverage-Deficit, the certificate MUST
     /// NOT be `valid` under this condition.
     #[error(
-        "coverage deficit: tool.invoked tool_kind={tool_kind} with no producer \
-         in observation_coverage declaring fs.* coverage"
+        "coverage deficit: tool.invoked tool_kind={tool_kind} with no observer \
+         in observation_coverage discharging fs.read coverage"
     )]
     CoverageDeficit {
         /// The tool kind that triggered the rule (`bash` or `task`).
@@ -340,15 +406,19 @@ impl Certificate {
     ///   contract). Enforced regardless of status.
     /// - If `status.value == Valid` and any `tool.invoked` of kind
     ///   `bash|task` occurred, at least one producer in
-    ///   `observation_coverage` with `role == ProducerRole::Observer`
-    ///   MUST declare fs.* coverage (via its `emits` list). An
-    ///   `Adapter`-role producer does NOT discharge the obligation
+    ///   `observation_coverage` MUST satisfy
+    ///   [`CoverageEntry::discharges_subprocess_obligation`]: role
+    ///   `Observer`, `fs.read` in `emits`, and no `partial`
+    ///   declaration for `fs.read` outside
+    ///   [`PartialReason::OverApproximates`](crate::ir::PartialReason::OverApproximates).
+    ///   An `Adapter`-role producer does NOT discharge the obligation
     ///   however broad its `emits` list — it is blind inside
-    ///   subprocesses by construction. Otherwise the certificate is a
-    ///   coverage
-    ///   deficit and MUST NOT be `valid`. This is why v0 on macOS
-    ///   (StubObserver, zero fs coverage) reports `unknown` — not
-    ///   `valid` — on any computation that invoked Bash.
+    ///   subprocesses by construction — and neither does an observer
+    ///   that declares itself blind or lossy on reads. Otherwise the
+    ///   certificate is a coverage deficit and MUST NOT be `valid`.
+    ///   This is why v0 on macOS (StubObserver, zero fs coverage)
+    ///   reports `unknown` — not `valid` — on any computation that
+    ///   invoked Bash.
     ///
     /// # Errors
     ///
@@ -376,17 +446,21 @@ impl Certificate {
             return Ok(());
         }
 
-        // ONLY an observer-role producer discharges the obligation. An
-        // adapter that declares fs.read/fs.write does NOT — adapters
-        // synthesize filesystem events from tool inputs they can see and
-        // are blind inside subprocesses by construction. Accepting any
-        // producer here let a `valid` certificate stand behind zero
-        // subprocess observation, which is exactly what this rule exists
-        // to prevent.
-        let has_fs_covered_observer = self.observation_coverage.iter().any(|c| {
-            matches!(c.role, ProducerRole::Observer)
-                && (c.covers(EventKind::FsRead) || c.covers(EventKind::FsWrite))
-        });
+        // ONLY an observer-role producer that actually claims to see
+        // subprocess reads discharges the obligation. Both halves are
+        // load-bearing and both were holes (ADR 0011):
+        //
+        //   role     — an adapter synthesizes fs events from tool
+        //              inputs and is blind inside subprocesses by
+        //              construction, however broad its `emits`.
+        //   fs.read, — an observer declaring `under-approximates` or
+        //   not "|| "  `blind-in-scope` for fs.read sees nothing it can
+        //              be trusted on, and `fs.write` coverage alone
+        //              contributes zero dependency edges.
+        let has_fs_covered_observer = self
+            .observation_coverage
+            .iter()
+            .any(CoverageEntry::discharges_subprocess_obligation);
 
         for ev in events {
             if !matches!(ev.kind, EventKind::ToolInvoked) {
