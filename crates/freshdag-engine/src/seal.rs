@@ -123,6 +123,7 @@ fn artifact_reason_rank(code: ReasonCode) -> u8 {
         ReasonCode::CoverageDeficit => 0,
         ReasonCode::ProducerMissingFromCoverage => 1,
         ReasonCode::NoDependenciesObserved => 2,
+        ReasonCode::RecipeIdentityUnavailable => 3,
         // Edge-scoped codes never reach here; rank them last so a
         // future miscategorisation is visible rather than silent.
         _ => u8::MAX,
@@ -401,11 +402,35 @@ pub fn seal(input: SealInput<'_>) -> Result<Certificate, EngineError> {
             artifact_scoped.push(reason.clone());
         }
     }
+    // Invariant #9: a certificate may not claim `Valid` or `LikelyValid`
+    // about a computation with no recipe identity. This *caps* rather
+    // than refusing to seal, because for some runtimes the absence is
+    // permanent — Claude Code exposes no recipe — and refusing would
+    // report a tool failure for an artifact whose evidence is merely
+    // incomplete. Pushed before `capped` is computed so the cap sees it.
+    if certificate.produced_by.recipe_hash.is_none()
+        && matches!(
+            status_value,
+            ValidityStatus::Valid | ValidityStatus::LikelyValid
+        )
+        && !artifact_scoped
+            .iter()
+            .any(|r| r.reason == ReasonCode::RecipeIdentityUnavailable)
+    {
+        artifact_scoped.push(ValidityReason {
+            dependency_key: String::new(),
+            reason: ReasonCode::RecipeIdentityUnavailable,
+            detail: None,
+        });
+    }
+
     let capped = gate.cap
         || artifact_scoped.iter().any(|r| {
             matches!(
                 r.reason,
-                ReasonCode::CoverageDeficit | ReasonCode::ProducerMissingFromCoverage
+                ReasonCode::CoverageDeficit
+                    | ReasonCode::ProducerMissingFromCoverage
+                    | ReasonCode::RecipeIdentityUnavailable
             )
         });
     let final_status = if capped {
@@ -437,6 +462,11 @@ pub fn seal(input: SealInput<'_>) -> Result<Certificate, EngineError> {
         });
     }
 
+    // Now a backstop rather than the mechanism: the cap above should
+    // have made this unreachable. It stays because it is the last place
+    // an invariant-#9 violation can be caught before bytes exist, and a
+    // future edit that bypasses the cap should fail loudly here rather
+    // than emit a certificate claiming more than it can support.
     if matches!(
         final_status,
         ValidityStatus::Valid | ValidityStatus::LikelyValid

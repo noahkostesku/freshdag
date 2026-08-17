@@ -168,6 +168,7 @@ empty string `""` (not `null`, not omitted).
 | `producer-missing-from-coverage` | artifact | An event in the stream names a producer absent from `observation_coverage`. |
 | `no-dependencies-observed` | artifact | The computation produced an artifact with zero observed dependencies. Absence of evidence is not evidence of freshness. |
 | `dependency-changed-during-computation` | edge | The same dependency was observed more than once within one computation with different fingerprints: the input changed while the agent was reading it. The recorded fingerprint is one of at least two and nothing says which the computation consumed, so the edge is `unknown` and the artifact can never be `valid`. |
+| `recipe-identity-unavailable` | artifact | The computation carries no `recipe_hash`, so no certificate about it may claim `valid` or `likely-valid` (§Field Rules, invariant #9). The dependencies may all have verified; what is missing is the identity of the computation they belong to. Some runtimes cannot supply one at all — Claude Code exposes no recipe — so for those this caps every artifact they produce. The engine **caps at `unknown`** rather than refusing to emit: the absence is a fact about the evidence, not a tool failure. |
 
 Three vocabularies in FreshDAG share spellings and must not be
 conflated: reason codes (this table), probe results
@@ -372,6 +373,25 @@ version bump to `schemas/certificate/v0.2.json` and a new
 fields) continue to land in place.
 
 ### Changelog
+
+- **v0.1 — `recipe-identity-unavailable` added.** Thirteenth reason
+  code, artifact-scoped. Previously the engine *refused to seal* a
+  certificate whose status would be `valid`/`likely-valid` without a
+  `recipe_hash`, which reported a tool failure for an artifact whose
+  evidence was merely incomplete — and for runtimes that can never
+  supply a recipe (Claude Code exposes none), refusing was permanent.
+  The engine now caps at `unknown` and attaches this code. Additive on
+  the wire; a consumer holding the pre-change v0.1 validator rejects a
+  certificate carrying it, because JSON Schema enums are closed. No
+  artifact that was `valid` becomes less valid: the affected
+  certificates could not be emitted at all before. See ADR 0014.
+- **v0.1 — reason-code enum widened 10 → 12** (recorded late).
+  `volatile-within-ttl-unprobed` and
+  `dependency-changed-during-computation` were added by ADR 0009 without
+  a changelog entry. Flagged by the `architect` review of 2026-08-17:
+  additive is right for *writers* and wrong for *readers*, since a
+  consumer holding the older v0.1 validator rejects a valid new
+  certificate. Recorded here so the omission does not recur silently.
 
 - **v0.1 — Wave 2 Phase B.** `observation_coverage[].partial` added:
   present in the producer's coverage manifest all along, but dropped at

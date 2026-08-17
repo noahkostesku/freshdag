@@ -100,6 +100,16 @@ fn matching_edge() -> EdgeOutcome {
     }
 }
 
+/// The same edge, drifted. A `Drift` verdict makes the artifact
+/// `Stale`, which the certificate contract does not gate on
+/// `recipe_hash`.
+fn drifted_edge() -> EdgeOutcome {
+    let mut edge = matching_edge();
+    edge.verdict = EdgeVerdict::Drift;
+    edge.reason = Some((ReasonCode::Drift, None));
+    edge
+}
+
 fn input(
     events: &[IrEvent],
     coverage: Vec<CoverageEntry>,
@@ -290,12 +300,20 @@ fn an_empty_coverage_list_is_a_structural_defect() {
 }
 
 /// certificate-contract §Field Rules: `recipe_hash` is required for
-/// `valid` and `likely-valid`. Without one the engine refuses rather
-/// than emitting a certificate whose provenance cannot be checked.
+/// `valid` and `likely-valid`. Without one the engine **caps at
+/// `unknown`** and says why, rather than refusing to seal.
+///
+/// It refused until ADR 0014. That was wrong for the case that
+/// actually occurs: some runtimes cannot supply a recipe at all —
+/// Claude Code exposes none — so refusing reported a *tool failure*
+/// for an artifact whose evidence was merely incomplete, and the caller
+/// got exit 3 ("ignore this result") where the truth was exit 2 ("do
+/// not reuse"). Capping states the same fact as a verdict the user can
+/// act on.
 #[test]
-fn a_valid_status_without_a_recipe_hash_is_refused() {
+fn a_valid_status_without_a_recipe_hash_is_capped_at_unknown() {
     let events: Vec<IrEvent> = Vec::new();
-    let err = seal(input(
+    let certificate = seal(input(
         &events,
         coverage("freshdag-adapter-claude"),
         CoverageAuthority::EngineAssembled,
@@ -303,12 +321,81 @@ fn a_valid_status_without_a_recipe_hash_is_refused() {
         vec![matching_edge()],
         None,
     ))
-    .expect_err("no recipe hash");
+    .expect("a missing recipe hash caps rather than refusing");
+
+    assert_eq!(certificate.status.value, ValidityStatus::Unknown);
     assert_eq!(
-        err,
-        EngineError::MissingRecipeHash {
-            status: ValidityStatus::Valid
-        }
+        certificate
+            .status
+            .reasons
+            .iter()
+            .map(|r| r.reason)
+            .collect::<Vec<_>>(),
+        vec![ReasonCode::RecipeIdentityUnavailable],
+        "the cap must explain itself (invariant #6)"
+    );
+    assert!(
+        certificate.produced_by.recipe_hash.is_none(),
+        "the test is vacuous unless the recipe hash really is absent"
+    );
+}
+
+/// The edge that was verified is still reported as verified. Capping
+/// the *artifact* must not rewrite what was observed about its inputs,
+/// or `freshdag why` would tell the user their dependency was
+/// unchecked when a probe had in fact matched it.
+#[test]
+fn capping_for_recipe_identity_does_not_discard_edge_evidence() {
+    let events: Vec<IrEvent> = Vec::new();
+    let certificate = seal(input(
+        &events,
+        coverage("freshdag-adapter-claude"),
+        CoverageAuthority::EngineAssembled,
+        BTreeSet::new(),
+        vec![matching_edge()],
+        None,
+    ))
+    .expect("caps rather than refusing");
+
+    assert_eq!(
+        certificate.depends_on.len(),
+        1,
+        "the observed dependency survives the cap"
+    );
+    assert!(
+        !certificate
+            .status
+            .reasons
+            .iter()
+            .any(|r| !r.reason.is_artifact_scoped()),
+        "no edge-scoped reason was invented for an edge that matched"
+    );
+}
+
+/// `Stale` does not require a recipe hash, and drift is positive
+/// evidence the artifact is out of date. A missing recipe identity must
+/// not launder that into `unknown`.
+#[test]
+fn a_stale_status_without_a_recipe_hash_stays_stale() {
+    let events: Vec<IrEvent> = Vec::new();
+    let certificate = seal(input(
+        &events,
+        coverage("freshdag-adapter-claude"),
+        CoverageAuthority::EngineAssembled,
+        BTreeSet::new(),
+        vec![drifted_edge()],
+        None,
+    ))
+    .expect("stale seals without a recipe hash");
+
+    assert_eq!(certificate.status.value, ValidityStatus::Stale);
+    assert!(
+        !certificate
+            .status
+            .reasons
+            .iter()
+            .any(|r| r.reason == ReasonCode::RecipeIdentityUnavailable),
+        "a stale artifact is not capped, so it gets no cap reason"
     );
 }
 

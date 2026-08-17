@@ -82,7 +82,8 @@
                   "probe-trust-demoted",
                   "producer-missing-from-coverage",
                   "volatile-within-ttl-unprobed",
-                  "dependency-changed-during-computation"
+                  "dependency-changed-during-computation",
+                  "recipe-identity-unavailable"
                 ]
               },
               "detail": {
