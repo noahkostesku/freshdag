@@ -54,14 +54,17 @@ scenario file:
   carries at least one `reason_codes[]` entry (invariant #6 mirrored
   at the scenario level),
 - and that every `reason_codes[]` entry is a member of the closed
-  `ReasonCode` set — kebab-case wire form: `drift`, `probe-unknown`,
-  `trust-class-heuristic-caps-at-likely-valid`,
-  `trust-class-volatile-caps-at-likely-valid`, `ttl-expired`,
-  `coverage-deficit`, `no-dependencies-observed`,
-  `volatile-within-ttl-unprobed`,
-  `dependency-changed-during-computation`,
-  `probe-trust-demoted`, `producer-missing-from-coverage`. See
-  `schemas/scenario/v0.1.json`.
+  `ReasonCode` set, in kebab-case wire form.
+
+  **The members are deliberately not listed here.** Read them from
+  `docs/contracts/certificate-contract.md §Reason Codes` or from
+  `ReasonCode` in `freshdag-core::dependency::validity`, which is the
+  source of truth; `schemas/scenario/v0.1.json` is the mirror this test
+  validates against.
+
+  The list that used to be here was stale at 11 of 14 members within a
+  day of the vocabulary changing. ADR 0015 Decision 3 makes every
+  non-normative mention a pointer rather than a copy.
 
 ## `input_probes`
 

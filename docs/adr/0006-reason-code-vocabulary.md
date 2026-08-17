@@ -3,6 +3,13 @@
 - **Status:** accepted
 - **Date:** 2026-08-15
 - **Deciders:** architect
+- **Amended:** 2026-08-17 — see §Amendment. **The ten-row table in
+  §Decision is a historical record of the vocabulary on 2026-08-15 and
+  is no longer a normative statement of membership.** The vocabulary now
+  has fourteen members; the normative list is `ReasonCode` in
+  `freshdag-core::dependency::validity`, mirrored in
+  `docs/contracts/certificate-contract.md §Reason Codes`. The closedness
+  argument below is unchanged and still governs. See ADR 0015.
 - **Consulted:** core-engineer, probe-engineer, observer-engineer,
   eval-engineer (Wave 2 Phase A)
 
@@ -54,6 +61,16 @@ rather than guess.
 The vocabulary is ten codes, each either edge-scoped (explains one
 `depends_on[]` entry) or artifact-scoped (explains the certificate as a
 whole, with `dependency_key: ""`):
+
+> **Historical as of 2026-08-17 — do not cite this table for
+> membership.** It records the vocabulary as decided on 2026-08-15. Four
+> members have since been added (ADR 0009, ADR 0014, and commit
+> `560151e`); the current list is `ReasonCode` in
+> `freshdag-core::dependency::validity`, mirrored in
+> `docs/contracts/certificate-contract.md §Reason Codes`. The table is
+> left as written because an ADR records what was decided when, and the
+> growth from ten is itself part of the record. See §Amendment and ADR
+> 0015.
 
 | Code | Scope |
 | --- | --- |
@@ -201,3 +218,54 @@ that was wrong, and the update it said was unnecessary has been made.
 - **Default `ProducerRole` to `Adapter` to avoid a breaking change.**
   Rejected. The defaulted value would be the one that reintroduces the
   invariant-#7 hole this ADR closes.
+
+---
+
+## Amendment (2026-08-17): the vocabulary grew 40% in a day, and this ADR could not tell anyone whether that was allowed
+
+Ruled by `architect` in the retrospective review of the 2026-08-17
+merges. **Nothing in §Decision's reasoning is withdrawn.** What changes
+is what this document may be cited for.
+
+**What happened.** Ten codes on 2026-08-15; fourteen on 2026-08-17. ADR
+0009 added two and declared `Extends: ADR 0006`. ADR 0014 added a third
+and did not. The fourteenth,`unproven-dependency`, landed in commit
+`560151e` with no ADR, as part of a verifier remediation that closed a
+live invariant-#7 hole. All four are adjudicated in ADR 0015 and all
+four are warranted on the merits.
+
+**What this ADR got wrong.** Not the closedness argument — that holds,
+and every widening honoured it: the set stayed finite, enumerable,
+schema-enforced, with no `Other(String)` escape hatch, and a certificate
+carrying an unknown code still fails to deserialize.
+
+Two things:
+
+1. **It conflated *closed* with *frozen*.** "The vocabulary is ten
+   codes" reads as a membership claim with no expiry, in a document
+   that stays `accepted` forever. Closedness is a property of the set at
+   any instant; stability over time is a different property this ADR
+   neither established nor scheduled. ADR 0015 Decision 1 separates
+   them.
+2. **It stated a membership rule and no admission test.** ADR 0009 said
+   the process for adding a member "is exactly the one ADR 0006
+   anticipated" — but this ADR anticipates only the contract-change
+   process, which is a *procedure*, not a test of whether a code is
+   warranted. Nothing here would have let a reviewer say no. ADR 0015
+   Decision 2 supplies the four-part test, generalising ADR 0012's
+   amended test for a warranted vocabulary member.
+
+**Also corrected:** §Consequences claims a test "asserting all three
+agree" keeps the Rust enum and both schemas in sync. It does not. A
+verifier added a variant to the enum, omitted it from
+`ALL_REASON_CODES` and both schemas, and the entire suite passed — the
+count assertion is hand-maintained and the schema test compares against
+the hand list rather than the enum. The only real guard is the
+compiler's exhaustive `match` in `freshdag-cli`. The contract table is
+guarded by nothing. ADR 0015 Decision 4 makes the guard mandatory and
+specifies it.
+
+**This ADR is no longer the place to look up the vocabulary.** ADR 0015
+Decision 3 names two normative registries — the Rust enum and the
+certificate-contract table — and forbids every other document from
+carrying a copy.
