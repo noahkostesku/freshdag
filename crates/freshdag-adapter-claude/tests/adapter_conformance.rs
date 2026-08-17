@@ -25,7 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use freshdag_adapter_claude::compile::Compiler;
-use freshdag_adapter_claude::config::AdapterConfig;
+use freshdag_adapter_claude::config::{AdapterConfig, PRODUCER};
 use freshdag_adapter_claude::determinism::{FixedClock, SeededIdGen};
 use freshdag_core::ir::IrEvent;
 
@@ -64,11 +64,20 @@ fn render(payload: &str) -> String {
     let mut compiler = Compiler::new(
         AdapterConfig::new(),
         FixedClock::conformance(),
-        SeededIdGen::conformance(),
+        // Seeded for this producer, not the shared untagged space: the
+        // observer's harness emits its own conformant stream, and the
+        // store detects duplicate `event_id`s globally.
+        SeededIdGen::for_producer(PRODUCER),
     );
     let events = compiler.compile_str(payload);
     let mut out = String::new();
     for event in &events {
+        assert_eq!(
+            event.producer, PRODUCER,
+            "the harness seeded the id generator for a different producer than the \
+             compiler stamps, so the goldens' ids would not be the ones this producer \
+             mints in production"
+        );
         out.push_str(&serde_json::to_string(event).expect("IR events serialize"));
         out.push('\n');
     }

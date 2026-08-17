@@ -62,7 +62,11 @@ pub fn linearize(events: impl Iterator<Item = IrEvent>) -> Vec<IrEvent> {
 pub struct DuplicateEventId {
     /// The repeated identifier.
     pub event_id: Uuid,
-    /// Producer that emitted it.
+    /// Producer of the first copy in canonical order.
+    ///
+    /// Not necessarily the only one: detection is global, so a
+    /// cross-producer collision reports one identifier whose copies came
+    /// from different producers, and this field names only the first.
     pub producer: String,
     /// How many events carried it.
     pub count: usize,
@@ -102,8 +106,20 @@ impl Linearization {
 
     /// Is this ordering reproducible from any physical input order?
     ///
-    /// False only when a producer emitted the same `event_id` twice with
-    /// different content.
+    /// False when the same `event_id` carried different content twice —
+    /// whether one producer emitted it twice, or **two producers each
+    /// emitted it once**.
+    ///
+    /// The check is deliberately global rather than per producer.
+    /// `execution-ir.md §Event Envelope` only makes `event_id` unique
+    /// *within* a producer, but the canonical order is
+    /// `(ts, producer, event_id)` and duplicates are never deduped, so a
+    /// collision across producers is equally fatal to reproducibility:
+    /// the tuple still separates the two events, but
+    /// [`DuplicateEventId`] cannot say which copy belongs to which
+    /// stream, and a consumer keying derived state by `event_id` sees
+    /// one identifier with two meanings. Producers keep their spaces
+    /// disjoint via `freshdag_core::determinism::SeededIdGen::for_producer`.
     pub fn is_deterministic(&self) -> bool {
         !self.duplicate_event_ids.iter().any(|d| d.divergent)
     }
@@ -351,6 +367,33 @@ mod tests {
         assert_eq!(out.events().len(), 2);
         assert!(!out.duplicate_event_ids()[0].divergent);
         assert!(out.is_deterministic());
+    }
+
+    /// Detection is global, and it has to be: this is the exact shape
+    /// two conformant producers took when both harnesses drew from the
+    /// same seeded generator.
+    #[test]
+    fn a_duplicate_across_two_producers_is_still_a_duplicate() {
+        let shared = "00000000-0000-7000-8000-000000000001";
+        let adapter = event("freshdag-adapter-claude", "s", ts(10), shared);
+        let observer = event("freshdag-observer-fsatrace", "s", ts(10), shared);
+
+        let out = linearize_checked(vec![adapter.clone(), observer].into_iter());
+        assert_eq!(out.events().len(), 2, "both copies retained");
+        assert_eq!(out.duplicate_event_ids().len(), 1);
+        assert_eq!(out.duplicate_event_ids()[0].count, 2);
+        assert!(
+            out.duplicate_event_ids()[0].divergent,
+            "different producers make the copies divergent"
+        );
+        assert!(
+            !out.is_deterministic(),
+            "a cross-producer collision is not a reproducible replay"
+        );
+
+        // The same identifier from one producer only, for contrast.
+        let out = linearize_checked(vec![adapter.clone(), adapter].into_iter());
+        assert!(out.is_deterministic(), "byte-identical copies are harmless");
     }
 
     #[test]
