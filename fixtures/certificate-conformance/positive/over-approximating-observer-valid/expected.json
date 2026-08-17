@@ -1,0 +1,6 @@
+{
+  "invariant_check": "pass",
+  "reason": "all-exact dependency artifact reports valid",
+  "coverage_check": "pass",
+  "coverage_reason": "an over-approximating observer still discharges the bash obligation; over-reporting costs staleness, never freshness"
+}

@@ -1,0 +1,6 @@
+{
+  "invariant_check": "pass",
+  "reason": "structurally well-formed: every field rule holds, so check_invariants alone cannot see the defect — that is the point of this fixture",
+  "coverage_check": "fail",
+  "coverage_reason": "CoverageDeficit"
+}

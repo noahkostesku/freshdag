@@ -1,0 +1,19 @@
+[
+  {
+    "event_id": "018f5b52-4b8b-7a1a-9c2f-0000000000b1",
+    "producer": "freshdag-adapter-claude",
+    "producer_version": "0.1.0",
+    "session_id": "sess-blind",
+    "computation_id": "comp:1111111111111111111111111111111111111111111111111111111111111111",
+    "parent_id": null,
+    "causal_inputs": null,
+    "ts": "2026-08-15T13:45:20.000000000Z",
+    "kind": "tool.invoked",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_kind": "bash",
+      "tool_input": { "command": "python3 build.py" },
+      "cwd": "/repo"
+    }
+  }
+]
