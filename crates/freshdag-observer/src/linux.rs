@@ -2,12 +2,28 @@
 //!
 //! Approach (per observer research memo and observer contract):
 //! `fsatrace` intercepts libc I/O via `LD_PRELOAD` and writes a
-//! newline-delimited trace to a file. Each line has the shape
-//! `<op>|<path>` where `<op>` is one of `r` (read), `w` (write),
-//! `m` (modify), `d` (delete), `q` (query/stat), `t` (touch), plus
-//! `R`/`W` for rename (source/target on adjacent lines). We consume the
-//! trace after the wrapped process exits and translate it to canonical
-//! IR events.
+//! newline-delimited trace to a file. Most lines have the shape
+//! `<op>|<path>`, where `<op>` is one of `r` (read), `w` (write),
+//! `d` (delete), `q` (query/stat), `t` (touch). We consume the trace
+//! after the wrapped process exits and translate it to canonical IR
+//! events.
+//!
+//! **`m` is *move*, and it carries two paths:**
+//! `m|<destination>|<source>`. An earlier revision of this module
+//! documented `m` as "modify" with a single path, and documented `R`/`W`
+//! rename ops that fsatrace does not emit. The parser split on the first
+//! `|` only, so a real move produced an `fs.write` at the concatenated
+//! path `"<destination>|<source>"` — a fabricated write at a path that
+//! cannot exist, while the actual rename target got no event at all.
+//! [`parse_fsatrace_lines`] now splits both fields.
+//!
+//! Because this backend has never been exercised against a recorded
+//! fsatrace trace (`fixtures/observer-conformance/` does not yet exist,
+//! though observer-contract §Testing defines conformance in terms of
+//! it), the parser accepts a single-path `m` as a write rather than
+//! assuming the two-path form is the only one. Standing that fixture set
+//! up is what would settle the wire format from evidence instead of from
+//! upstream documentation.
 //!
 //! For W6.1 we support the read and write kinds — the minimum needed
 //! for the Wave-1 fixtures. Full trace support (renames, negative
@@ -276,10 +292,21 @@ pub fn parse_fsatrace_lines(
 ) -> Vec<freshdag_core::ir::IrEvent> {
     let mut events = Vec::new();
     for line in trace.lines() {
-        let Some((op, path)) = line.split_once('|') else {
+        let Some((op, rest)) = line.split_once('|') else {
             continue;
         };
-        let path = path.trim();
+        let rest = rest.trim();
+        if rest.is_empty() {
+            continue;
+        }
+        // A move line carries TWO paths. Split on the remaining
+        // separator so a second path can never be concatenated into the
+        // first — the defect this guard replaces emitted
+        // `path: "/dst|/src"`, a write at a path that cannot exist.
+        let (path, second) = match rest.split_once('|') {
+            Some((first, second)) => (first.trim(), Some(second.trim())),
+            None => (rest, None),
+        };
         if path.is_empty() {
             continue;
         }
@@ -296,6 +323,14 @@ pub fn parse_fsatrace_lines(
                     "impure": false
                 }),
             )),
+            // A two-path `m` is a move, and this backend does not yet
+            // emit the synthetic write at the rename target that
+            // observer-contract §Required Behavior #3 requires. Emitting
+            // nothing keeps the gap in the fail-safe direction and
+            // matches what the coverage manifest declares. Emitting the
+            // destination write is the fix, and it is feature work, not
+            // this repair.
+            "m" if second.is_some() => {}
             "w" | "m" | "t" => events.push(make_event(
                 session_id,
                 version,
@@ -307,10 +342,9 @@ pub fn parse_fsatrace_lines(
                 }),
             )),
             _ => {
-                // rename source/target ("R"/"W" with adjacent lines),
-                // deletes, queries, and any future op are not covered
-                // by W6.1 and are silently skipped. Consumers see this
-                // as absent-because-uncovered via the coverage manifest,
+                // Deletes, queries, and any future op are not covered by
+                // W6.1 and are silently skipped. Consumers see this as
+                // absent-because-uncovered via the coverage manifest,
                 // which is honest silence per invariant #7.
             }
         }

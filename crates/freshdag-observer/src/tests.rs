@@ -17,7 +17,7 @@ fn parses_read_and_write_lines() {
     let trace = "\
 r|/abs/path/ICP.md
 w|/abs/path/brief.md
-m|/abs/path/appended.md
+m|/abs/path/single-path-move.md
 t|/abs/path/touched.md
 d|/abs/path/deleted.md
 q|/abs/path/statted.md
@@ -41,6 +41,46 @@ q|/abs/path/statted.md
         assert_eq!(e.session_id, "sess-abc");
         assert_eq!(e.producer, "freshdag-observer-fsatrace");
         assert_eq!(e.producer_version, "0.1.0");
+    }
+}
+
+/// A move line carries two paths (`m|<destination>|<source>`). The
+/// parser must never concatenate them into one.
+///
+/// Regression test. The previous parser split on the first `|` only and
+/// emitted `FsWrite { path: "/abs/path/brief.md|/abs/path/brief.tmp" }`
+/// — a write at a path that cannot exist, while the real rename target
+/// got nothing. That is a fabricated observation, and an observer that
+/// invents events is worse than one that misses them: it is the
+/// direction invariant #7 forbids.
+#[test]
+fn a_two_path_move_never_emits_a_concatenated_path() {
+    let trace = "\
+w|/abs/path/brief.tmp
+m|/abs/path/brief.md|/abs/path/brief.tmp
+";
+    let events = parse_fsatrace_lines(trace, "s", "v");
+
+    // The temp-path write survives; the move emits nothing, because the
+    // synthetic write at the rename target (observer-contract §Required
+    // Behavior #3) is not implemented and the manifest declares that.
+    assert_eq!(events.len(), 1, "the move line must not emit an event");
+    match events[0].decode_payload().unwrap() {
+        TypedPayload::FsWrite(w) => {
+            assert_eq!(w.path.to_str().unwrap(), "/abs/path/brief.tmp");
+        }
+        other => panic!("expected FsWrite, got {other:?}"),
+    }
+
+    // The specific defect: no emitted path may contain a separator.
+    for e in &events {
+        if let TypedPayload::FsWrite(w) = e.decode_payload().unwrap() {
+            assert!(
+                !w.path.to_str().unwrap().contains('|'),
+                "emitted a concatenated path: {:?}",
+                w.path
+            );
+        }
     }
 }
 
