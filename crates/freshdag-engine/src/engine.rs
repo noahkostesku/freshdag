@@ -2,10 +2,14 @@
 //!
 //! The dispatch order for one dependency edge, and why it is that order:
 //!
-//! 1. **TTL first.** A `volatile` edge whose declared TTL has elapsed is
-//!    `Unknown` with [`ReasonCode::TtlExpired`] before any probe runs.
-//!    Asking a probe about an expired window and believing its answer
-//!    would be the promotion invariant #7 forbids.
+//! 1. **Trust class `volatile` first, in full.** ARCHITECTURE §7 defines
+//!    such an edge entirely by its declared TTL — inside the window it
+//!    is `Match` capped at LikelyValid, outside it (or with no usable
+//!    declaration) `Unknown` with [`ReasonCode::TtlExpired`]. §7's
+//!    amendment requires this be a *positive* branch keyed on the trust
+//!    class and evaluated before probe arbitration, so that registering
+//!    an unrelated probe for the scheme cannot silently change the
+//!    verdict. No probe is consulted for a volatile edge.
 //! 2. **Probe removal.** If the probe that last answered for this key is
 //!    no longer registered, the edge is `Unknown` with
 //!    [`ReasonCode::NoProbeAvailable`]. The engine does NOT fall through
@@ -278,29 +282,57 @@ impl Engine {
             reason: Some((code, Some(detail))),
         };
 
-        // 1. TTL, before anything else (ARCHITECTURE §7).
+        // 1. Trust class `volatile`, decided in full before any probe is
+        //    considered (ARCHITECTURE §7 and its amendment).
+        //
+        //    A `volatile` dependency is by definition one for which no
+        //    trustworthy freshness signal exists, so the only evidence
+        //    this edge has is the producer's *declared TTL*. Inside the
+        //    window the edge is `Match`, capped at LikelyValid; outside
+        //    it — or with no usable declaration — it is `Unknown`.
+        //
+        //    §7's amendment requires this be a positive branch keyed on
+        //    the trust class, evaluated before probe arbitration, and
+        //    never a fallback in an arbitration-failure path. It used to
+        //    live in step 3's `Err(no_probe)` arm, where registering an
+        //    unrelated probe for the scheme silently flipped the
+        //    verdict: two edges at the same trust class, inside the same
+        //    TTL, over the same absent resource reported `likely-valid`
+        //    for `web.search://…` and `unknown` for `file:///…` on the
+        //    strength of the scheme alone.
+        //
+        //    Nothing here can reach `Valid`. The recorded class stays
+        //    `Volatile`, which `Validity::aggregate` caps at LikelyValid
+        //    and `Certificate::check_invariants` refuses outright at
+        //    `Valid`.
         if matches!(dep.trust_class, TrustClass::Volatile) {
-            match dep.ttl_seconds {
-                None => {
-                    return unknown(ReasonCode::TtlExpired, "ttl_seconds=absent".to_string());
-                }
-                Some(secs) => match ttl_expiry(dep.observed_at, secs) {
-                    // A TTL we cannot turn into an instant is not
-                    // evidence that the window is open; it is the
-                    // absence of a usable declaration. Invariant #7:
-                    // treat it exactly as an elapsed TTL.
-                    None => {
-                        return unknown(
-                            ReasonCode::TtlExpired,
-                            format!("ttl_seconds={secs} not-representable"),
-                        );
-                    }
-                    Some(expires_at) if now > expires_at => {
-                        return unknown(ReasonCode::TtlExpired, format!("ttl_seconds={secs}"));
-                    }
-                    Some(_) => {}
-                },
+            let Some(secs) = dep.ttl_seconds else {
+                return unknown(ReasonCode::TtlExpired, "ttl_seconds=absent".to_string());
+            };
+            // A TTL we cannot turn into an instant is not evidence that
+            // the window is open; it is the absence of a usable
+            // declaration. Invariant #7: treat it as an elapsed TTL.
+            let Some(expires_at) = ttl_expiry(dep.observed_at, secs) else {
+                return unknown(
+                    ReasonCode::TtlExpired,
+                    format!("ttl_seconds={secs} not-representable"),
+                );
+            };
+            if now > expires_at {
+                return unknown(ReasonCode::TtlExpired, format!("ttl_seconds={secs}"));
             }
+            return EdgeOutcome {
+                dependency: dep.clone(),
+                verdict: EdgeVerdict::Match {
+                    recorded_trust_class: TrustClass::Volatile,
+                    observed_trust_class: TrustClass::Volatile,
+                    observed_fp: dep.fingerprint.clone(),
+                },
+                reason: Some((
+                    ReasonCode::TrustClassVolatileCapsAtLikelyValid,
+                    Some("within-declared-ttl".to_string()),
+                )),
+            };
         }
 
         // 2. Probe removal. Never fall through to another probe.
@@ -348,28 +380,9 @@ impl Engine {
                         }),
                     ));
                 }
-                // The single case where "no probe" is not `Unknown`:
-                // ARCHITECTURE §7 defines a `volatile` edge inside its
-                // TTL as LikelyValid, and probe-contract §Trust-class
-                // Semantics defines the volatile probe's entire job as
-                // that same TTL comparison. Step 1 above already proved
-                // the window is open. The status is capped at
-                // LikelyValid and carries the volatile reason code, so
-                // nothing is promoted to `valid`.
-                if matches!(dep.trust_class, TrustClass::Volatile) {
-                    return EdgeOutcome {
-                        dependency: dep.clone(),
-                        verdict: EdgeVerdict::Match {
-                            recorded_trust_class: TrustClass::Volatile,
-                            observed_trust_class: TrustClass::Volatile,
-                            observed_fp: dep.fingerprint.clone(),
-                        },
-                        reason: Some((
-                            ReasonCode::TrustClassVolatileCapsAtLikelyValid,
-                            Some("within-declared-ttl".to_string()),
-                        )),
-                    };
-                }
+                // No `volatile` special case here, deliberately: step 1
+                // already decided every volatile edge, so "no probe" at
+                // this point means exactly what it says.
                 return unknown(ReasonCode::NoProbeAvailable, no_probe.detail());
             }
         };
@@ -807,7 +820,10 @@ fn trust_wire(class: TrustClass) -> &'static str {
 /// The edge-scoped reason a *matching* edge contributes, if any.
 ///
 /// This mirrors `Validity::aggregate`'s own table; the engine's
-/// self-audit in `seal` fails loudly if the two ever disagree.
+/// self-audit in `seal` fails loudly if the two ever disagree. The
+/// `Volatile` arm is unreachable from `evaluate_edge` — step 1 decides
+/// every volatile edge before dispatch — and is kept because the table
+/// it mirrors is total.
 fn caps_reason(recorded: TrustClass) -> Option<(ReasonCode, Option<String>)> {
     match recorded {
         TrustClass::Heuristic => Some((ReasonCode::TrustClassHeuristicCapsAtLikelyValid, None)),

@@ -393,6 +393,99 @@ fn a_volatile_edge_inside_ttl_is_likely_valid_and_never_valid() {
     );
 }
 
+/// The regression D2 is: the volatile-inside-TTL rule must be a positive
+/// branch keyed on the trust class, not a fallback in the
+/// arbitration-failure path.
+///
+/// While it lived in `Err(no_probe)`, two edges at the same trust class,
+/// inside the same TTL, over the same absent resource disagreed on the
+/// strength of their scheme alone — `web.search://…` (nothing
+/// registered) reported `likely-valid` and `file:///…` (a probe
+/// registered, answering `Unknown` because the file is gone) reported
+/// `unknown`. Registering an unrelated probe must not move the verdict.
+#[test]
+fn a_volatile_edge_inside_ttl_ignores_whether_a_probe_is_registered() {
+    let fingerprint = format!("blake3:{}", blake3_of("volatile"));
+    let run = |register: bool| {
+        let fixture = Fixture::new("volatile-probe-independence").with_probe_edge(
+            "https",
+            "acme.com/pricing",
+            &fingerprint,
+            TrustClass::Volatile,
+            Some(3600),
+        );
+        let mut registry = ProbeRegistry::new();
+        if register {
+            registry
+                .register(Arc::new(ScriptedProbe::new("https").with_fallback(
+                    ProbeResult::Unknown {
+                        reason: "no such resource".to_string(),
+                        retryable: false,
+                    },
+                )))
+                .expect("register");
+        }
+        let outcome = fixture.engine(registry).check_ok();
+        (
+            outcome.certificate.status.value,
+            outcome
+                .certificate
+                .status
+                .reasons
+                .iter()
+                .map(|r| r.reason)
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    let (unprobed_status, unprobed_reasons) = run(false);
+    let (probed_status, probed_reasons) = run(true);
+    assert_eq!(
+        unprobed_status,
+        ValidityStatus::LikelyValid,
+        "ARCHITECTURE §7: inside its TTL a volatile edge is likely-valid"
+    );
+    assert_eq!(
+        (probed_status, &probed_reasons),
+        (unprobed_status, &unprobed_reasons),
+        "registering an unrelated probe for the scheme changed the verdict"
+    );
+    assert_eq!(
+        unprobed_reasons,
+        vec![ReasonCode::TrustClassVolatileCapsAtLikelyValid]
+    );
+}
+
+/// The contrast that keeps the test above honest: at a *non*-volatile
+/// trust class the same registered probe does decide the edge, so the
+/// positive branch is keyed on the trust class and nothing else.
+#[test]
+fn a_non_volatile_edge_still_depends_on_its_probe() {
+    let fingerprint = format!("blake3:{}", blake3_of("volatile"));
+    let fixture = Fixture::new("non-volatile-probe-dependence").with_probe_edge(
+        "https",
+        "acme.com/pricing",
+        &fingerprint,
+        TrustClass::Versioned,
+        Some(3600),
+    );
+    let mut registry = ProbeRegistry::new();
+    registry
+        .register(Arc::new(ScriptedProbe::new("https").with_fallback(
+            ProbeResult::Unknown {
+                reason: "no such resource".to_string(),
+                retryable: true,
+            },
+        )))
+        .expect("register");
+    let outcome = fixture.engine(registry).check_ok();
+    assert_eq!(outcome.certificate.status.value, ValidityStatus::Unknown);
+    assert_eq!(
+        outcome.certificate.status.reasons[0].reason,
+        ReasonCode::ProbeUnknown
+    );
+}
+
 /// certificate-contract §Coverage-Deficit: a `bash` invocation with no
 /// observer-role producer in `observation_coverage` forbids `valid`,
 /// even when every declared dependency is `exact` and matches.
