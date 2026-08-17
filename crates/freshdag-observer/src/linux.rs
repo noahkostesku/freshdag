@@ -34,7 +34,9 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use freshdag_core::ir::{CoverageManifest, EventKind, EventKindPattern, ProducerRole};
+use freshdag_core::ir::{
+    CoverageManifest, EventKind, EventKindPattern, PartialCoverage, PartialReason, ProducerRole,
+};
 use serde_json::json;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -102,7 +104,7 @@ impl Observer for FsatraceObserver {
     fn coverage(&self) -> CoverageManifest {
         let mut capabilities: std::collections::BTreeMap<String, serde_json::Value> =
             std::collections::BTreeMap::new();
-        let mut partial: std::collections::BTreeMap<String, String> =
+        let mut partial: std::collections::BTreeMap<String, PartialCoverage> =
             std::collections::BTreeMap::new();
 
         if !cfg!(target_os = "linux") {
@@ -151,19 +153,41 @@ impl Observer for FsatraceObserver {
         // are genuinely partial today (observer-contract §Correctness
         // Pitfalls), so declaring them without these notes would
         // overclaim.
+        //
+        // Both are `under-approximates`, and that classification is read
+        // off this backend's own notes, not off ADR 0011 — which has no
+        // standing to classify a producer (ADR 0011, Amendment,
+        // Correction 1). Each note describes events that happen and are
+        // *not emitted*: mmap reads bypass interception entirely, and
+        // the synthetic write at a rename target is unimplemented. That
+        // is the fail-unsafe direction. `over-approximates` would mean
+        // "may report events that did not happen, never misses one",
+        // which is the opposite of what this backend does.
+        //
+        // Consequence, and it is the expected one rather than a
+        // regression (ADR 0011, Amendment, Correction 3): this observer
+        // no longer discharges a `bash`/`task` observation obligation,
+        // so `bash`-invoking computations on Linux report non-`valid`.
+        // It cannot see mmap reads or statically linked processes, so it
+        // cannot answer the question the rule asks. Closing the gap —
+        // not relabelling it — is what restores discharge.
         partial.insert(
             "fs.read".to_string(),
-            "mmap reads bypass LD_PRELOAD interception and are not emitted \
-             (observer-contract §Correctness Pitfalls #2); statically linked or \
-             raw-syscall processes are invisible"
-                .to_string(),
+            PartialCoverage::new(
+                PartialReason::UnderApproximates,
+                "mmap reads bypass LD_PRELOAD interception and are not emitted \
+                 (observer-contract §Correctness Pitfalls #2); statically linked or \
+                 raw-syscall processes are invisible",
+            ),
         );
         partial.insert(
             "fs.write".to_string(),
-            "rename-atomic writes are emitted against the temporary path only; the \
-             synthetic fs.write at the rename target required by observer-contract \
-             §Required Behavior #3 is not yet implemented"
-                .to_string(),
+            PartialCoverage::new(
+                PartialReason::UnderApproximates,
+                "rename-atomic writes are emitted against the temporary path only; the \
+                 synthetic fs.write at the rename target required by observer-contract \
+                 §Required Behavior #3 is not yet implemented",
+            ),
         );
 
         CoverageManifest {
