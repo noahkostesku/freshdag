@@ -144,3 +144,75 @@ the semantics above are the decision.
   Rejected: `docs/EVALUATION.md §2` forbids pass/fail assertions on
   `detail`, so the distinction would be permanently untestable, and
   invariant #13 requires public contracts be testable.
+
+---
+
+## Amendment, 2026-08-16 — bounding the TTL as evidence (verifier D2)
+
+Raised by the `verifier` at Wave 2 rejection, ruled by `architect` the
+same day. Appended rather than superseding: the decision above stands
+unchanged and this constrains it.
+
+**The question.** `volatile-within-ttl-unprobed` makes the branch
+legible, but leaves a never-probed dependency at `LikelyValid` and
+therefore at exit 0 under `--accept-likely-valid`. Is legibility
+sufficient?
+
+**Ruling: legibility is necessary but not sufficient. There is a floor
+— on the unbounded parts of the argument, not on the trust class.**
+
+`ARCHITECTURE.md §7`'s amendment justifies this branch on the grounds
+that the producer's declared TTL is *present evidence*. That argument is
+sound only if the declaration is bounded and its timestamp is real.
+Neither is checked today, and the verifier found both holes:
+
+- `ttl_seconds: 1000000000` (~31 years) behaves identically to
+  `ttl_seconds: 3600`. A producer can purchase unlimited freshness by
+  declaring a large integer.
+- `observed_at` is never sanity-checked against now. A `probe.checked`
+  dated 2099 satisfies `now > expires_at == false` and stays
+  `likely-valid` forever.
+
+So the RFC 9111 analogy in §7 was doing more work than it can bear.
+HTTP's `max-age` arrives from an origin over an authenticated channel,
+and RFC 9111 §4.2.3 requires the cache compute `current_age` including
+transit, with a `Date` it validates. FreshDAG has none of that
+machinery, so an unbounded self-declared lifetime is not the same
+object. Four constraints restore the argument:
+
+1. **A declared TTL is evidence only within a configured maximum.**
+   The engine gains `max_volatile_ttl`, conservative default 24h.
+   Beyond it the edge is `Unknown` with `TtlExpired`, whatever the
+   producer declared. A `volatile` dependency is by definition one with
+   no trustworthy freshness signal; a day is already generous.
+2. **A future `observed_at` is not evidence.** If `observed_at` exceeds
+   now beyond a small skew tolerance, the edge is `Unknown`. TTL
+   arithmetic must not go negative-fresh. This promotes the `clock-skew`
+   entry in `docs/EVALUATION.md §2`'s backlog from backlog to blocker.
+3. **An exit-code floor, expressed through the new code rather than a
+   new status.** `--accept-likely-valid` MUST NOT accept a certificate
+   whose likely-valid basis includes `volatile-within-ttl-unprobed`.
+   Opting in requires a second, explicit flag (`--accept-unprobed-volatile`
+   or equivalent); a user who wants "nothing ever checked this, ship it"
+   has to say so. This is why legibility is not merely cosmetic: the
+   reason code is the mechanism that makes the floor implementable
+   without inventing a fifth `ValidityStatus`, which `LikelyValid`
+   otherwise describes correctly. CLI exit codes are stable ABI
+   (`docs/OWNERSHIP.md`), so `integration-engineer` co-signs.
+4. **The fixture stops enshrining one arm.**
+   `fixtures/scenarios/volatile-external-dep` is the only non-file
+   scenario with no `input_probes`, so it currently pins this branch as
+   *the* expected volatile answer. It gains a probed sibling, the
+   unprobed arm pins `volatile-within-ttl-unprobed`, and two new
+   fixtures cover the over-long TTL and the future timestamp.
+
+What is **not** changed: the class still caps at `LikelyValid` rather
+than falling to `Unknown`. Demoting it wholesale would make `volatile`
+unusable — no probe can ever exist for `time.now()` — and would undo
+ADR 0004's central argument. The fix is to bound the evidence, not to
+discard it.
+
+Separately noted for the implementer: `engine.rs:350-363` places this
+licensed verdict in the `Err(no_probe)` arm of arbitration, which
+`ARCHITECTURE.md §7` now forbids. The code motion is already dispatched
+by the `release-manager` and is not re-litigated here.

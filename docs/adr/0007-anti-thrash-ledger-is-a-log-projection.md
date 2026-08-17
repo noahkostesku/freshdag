@@ -127,3 +127,67 @@ per-process scratch. Concretely, Wave 3 lands four changes:
 entry, so the "forces re-observation" half of the contract clause is not
 implemented. ADR 0010 removes that trigger entirely, which makes the
 question moot; if ADR 0010 is rejected, this becomes a bug to fix.
+
+---
+
+## Amendment, 2026-08-16 — two hard preconditions on the record loop (verifier D1, D4)
+
+Raised by the `verifier` at Wave 2 rejection. Both are blocking: the
+record loop above MUST NOT land until each is closed, because each is
+latent today only because `--record` was dropped in `7e6b8bd`.
+
+### P1. `probe.checked.trust_class` records the *recorded* class, never the adopted one
+
+`engine.rs:384-390` writes the ledger's **adopted** class into the
+emitted `probe.checked`, with a comment asserting that this "cannot
+escalate a dependency's trust class behind the anti-thrash protocol's
+back." It does the opposite. If the in-memory ledger has escalated a
+dependency `heuristic → versioned`, the event written to the log says
+`trust_class: versioned`, and a replay of that log yields `Valid` where
+the store recorded `heuristic` — silent promotion across a process
+boundary, invariants #7 and #8.
+
+It is also, and independently, an invariant #5 violation. This ADR makes
+the ledger a **fold over `probe.checked`**. Writing the fold's own
+output back into the events being folded makes the projection
+non-idempotent: replaying a log whose events already encode the fold's
+result re-folds on top of it, so the derived state depends on how many
+times it has been derived. A projection with that property is not
+reconstructable in the sense invariant #5 means.
+
+The correction is small and makes the payload carry only inputs:
+
+- `trust_class` — the class **recorded on the dependency** (`dep.trust_class`,
+  what the store observed at production time).
+- `observed_trust_class` — what the probe saw this time. Already present.
+
+Adoption is then reconstructed by `TrustLedger::replay` from the
+sequence of `observed_trust_class` values, which is what the anti-thrash
+protocol was always defined over. Nothing derived is ever written to the
+log.
+
+### P2. ADR 0011 lands first
+
+Nothing in production registers a coverage manifest, so real adapter
+output currently caps at `unknown` and never reaches `valid`. That masks
+the partial-coverage hole in ADR 0011: an observer declaring itself
+blind discharges a `bash`/`task` obligation. Closing this record loop
+removes the mask and turns a masked hole into a live one. Sequencing is
+recorded in `docs/BUILD_PLAN.md §6.2`.
+
+### Related, non-blocking: the coverage gate's guard is a lint, not an invariant
+
+The `GateOutcome` token is sound but constrains only `seal.rs`. The
+source-reading guard covering the other seven engine files is defeated
+by path-qualified struct literals (`certificate::Certificate { … }`),
+`serde` deserialization, and clone-then-mutate. The `verifier`'s fix
+direction — a type, not a stricter regex — is correct and is the
+architectural rule: **an invariant enforced by reading source text is a
+lint; an invariant enforced by the type system is an invariant.** The
+shape that follows is a status field constructible only through the
+gate (a newtype whose sole public constructor consumes a `GateOutcome`,
+with a validating `Deserialize`), so struct literals cannot set it and
+deserialization cannot bypass it. That is a `freshdag-core` change and
+therefore needs `architect` sign-off when proposed; `core-engineer` and
+`graph-engineer` own the design. Not a precondition for the record
+loop, but it should not be deferred past Wave 3.

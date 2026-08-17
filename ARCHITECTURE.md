@@ -302,6 +302,24 @@ trust class, before probe arbitration — never as a fallback in an
 arbitration-failure path, where registering an unrelated probe for the
 scheme would silently change the verdict.
 
+**A declared TTL is evidence only where it is bounded and its timestamp
+is real.** The argument above holds because the producer asserted a
+lifetime, not because it asserted a number; an unbounded assertion is
+not the same object, and RFC 9111's caches validate an origin `Date`
+that FreshDAG has no equivalent of. Three constraints, added
+2026-08-16 after the Wave 2 verification found all three unenforced
+(ADR 0009, Amendment):
+
+- A TTL longer than the engine's configured `max_volatile_ttl`
+  (conservative default 24h) is `Unknown` / `TtlExpired` regardless of
+  what was declared. A producer cannot buy freshness with a large
+  integer.
+- An `observed_at` in the future, beyond a small skew tolerance, is
+  `Unknown`. TTL arithmetic must never go negative-fresh.
+- `--accept-likely-valid` does not accept `volatile-within-ttl-unprobed`
+  without a second, explicit opt-in. "Nothing has ever checked this" may
+  be acceptable to a given user, but only one who says so.
+
 The artifact's overall validity is the strict aggregation of its edges:
 
 - All `Valid` → `Valid`.

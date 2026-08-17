@@ -226,9 +226,34 @@ observer. If they are mostly files and it works, Wave 4 is
 recomputation. Right now all three are defensible, which means none of
 them is chosen.
 
+### Hard gate before any of it: W9. Close the partial-coverage hole
+
+**ADR 0011 lands before W10 and W11. This is a sequencing constraint,
+not a preference.**
+
+The Wave 2 verification found that an observer which declares itself
+blind (`partial: {"fs.read": "cannot see reads inside subprocesses"}`)
+discharges a `bash`/`task` observation obligation exactly as well as a
+real one, and the certificate reports `valid`, exit 0. The engine never
+reads `partial`; `CoverageEntry` drops it at the manifest→certificate
+boundary.
+
+That hole is **masked today** for an accidental reason: nothing in
+production registers a coverage manifest, so every real check caps at
+`unknown` and no real adapter output ever reaches `valid` at all. W10
+and W11 exist precisely to remove that mask. Landing them first converts
+a masked hole into a live one, on the path that produces the numbers
+Wave 3 exists to generate — which would make those numbers worse than
+useless, because they would be confidently wrong.
+
+Owner: `core-engineer` (types, schema) with `store-engineer`
+(`SilenceMeaning` becomes the single implementation),
+`observer-engineer` and `claude-adapter` (reclassify their manifests).
+
 ### What it costs
 
-Small in code, and mostly work already owed. Three workstreams:
+Small in code, and mostly work already owed. Three workstreams, all
+downstream of W9:
 
 **W10. Close the record loop** (blocking; `graph-engineer` +
 `integration-engineer`). Implements ADR 0007 items 1–2: the engine
@@ -237,6 +262,12 @@ appends the engine's `probe.checked` / `diagnostic` events. Without
 this, a real store's checks leave no trace and the anti-thrash protocol
 stays inert. Also lands ADR 0007 item 3, the additive `probe_identity`
 payload field.
+
+Must also close ADR 0007 Amendment P1 **in the same PR**:
+`probe.checked.trust_class` currently records the ledger's *adopted*
+class, so replaying an engine-emitted event promotes a `heuristic`
+dependency to `Valid`. Latent only because `--record` was dropped;
+restoring `--record` without this ships a silent-promotion path.
 
 **W11. Wire the hook to a store, not a file** (`claude-adapter` +
 `integration-engineer`). Today `freshdag-claude-hook` appends to a bare
