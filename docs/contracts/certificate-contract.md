@@ -25,6 +25,16 @@ that shared certificates cannot be silently rewritten.
 
 ## Shape
 
+> **Every payload in this document is illustrative, never
+> descriptive.** It shows the *shape* a conformant producer must
+> satisfy. It is not a factual claim about anything in `crates/`, and
+> no ADR, engine branch, test, or review may cite it as evidence of
+> what an in-tree producer declares — cite the source file (ADR 0011,
+> Amendment, Ruling 5). Where a shipped producer and an example here
+> diverge, that is a conformance gap in the producer, not a
+> contradiction in this contract. Example producer names are
+> deliberately suffixed `-example` so they cannot be mistaken for one.
+
 ```json
 {
   "cert_id":     "blake3:...",
@@ -91,11 +101,11 @@ that shared certificates cannot be silently rewritten.
         "fs.*": { "reason": "blind-in-scope",
                   "note": "no visibility inside bash/task subprocesses" }
       } },
-    { "producer": "freshdag-observer-fsatrace", "version": "0.1.0",
+    { "producer": "freshdag-observer-example", "version": "0.1.0",
       "role": "observer", "emits": ["fs.read", "fs.write"],
       "partial": {
         "fs.read": { "reason": "over-approximates",
-                     "note": "mmap reads hashed at mmap time" }
+                     "note": "reads reported at directory granularity" }
       },
       "known_limitations": ["glibc only"] }
   ]
@@ -234,8 +244,11 @@ three hold:
    "either one." Validity is about *inputs*: a producer that sees only
    writes contributes zero dependency edges, so it cannot answer the
    question this rule asks even in principle.
-3. Its `partial` declaration for `fs.read`, if any, is
-   `over-approximates`. See §Partial Coverage.
+3. **Every** `partial` entry whose pattern matches `fs.read` carries
+   the reason `over-approximates`. Not "the most specific one" — a
+   manifest is a conjunction of admissions, and a narrow entry must
+   not annotate away a broad one (ADR 0011, Amendment, Correction 4).
+   See §Partial Coverage.
 
 This is why v0 on macOS (no observer) reports `unknown` — not `valid` —
 on any computation that invoked `Bash`. That is correct behaviour, not
@@ -255,10 +268,29 @@ a defect.
 The direction of the error is the whole criterion. Over-approximation
 produces spurious *dependencies*, hence spurious staleness, which
 invariant #15 explicitly prefers; under-approximation and blindness
-produce spurious *freshness*, which invariant #7 forbids. This is why
-"any partial note disqualifies" is wrong: the reference observer
-legitimately over-approximates (mmap reads), and under a blunt rule
-nothing could ever discharge anything.
+produce spurious *freshness*, which invariant #7 forbids.
+
+This is why a blunt "any `partial` note disqualifies" rule is wrong,
+on two grounds that do not depend on what any current producer
+declares (ADR 0011, Amendment, Correction 2):
+
+- **Invariant #13.** A blunt rule leaves `partial` free text, so the
+  certificate records that an admission was made but not its
+  *direction*. A third-party rechecker is left with "there was a
+  note." The machine-readable `reason` is the whole point.
+- **A blunt rule makes honesty punitive.** A producer that sees every
+  event but reports coarsely — directory-granular reads, a hash taken
+  at mmap time rather than at each fault — is strictly safer than one
+  that reports nothing. Under a blunt rule its only way to keep
+  discharging is to delete the note. An incentive to under-document is
+  the opposite of what a coverage manifest is for.
+
+Note what this does *not* claim: that any observer shipped in this
+repository over-approximates. None is currently known to. The
+vocabulary earns its keep as the certificate's machine-readable
+explanation and as headroom for a producer that legitimately
+over-approximates — not, today, as a behavioural difference from the
+blunt rule.
 
 `note` is **non-normative**, under the same rules as
 `status.reasons[].detail`: no consumer may branch on it, it MUST be

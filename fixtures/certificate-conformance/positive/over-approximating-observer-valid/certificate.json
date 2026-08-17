@@ -50,7 +50,7 @@
       }
     },
     {
-      "producer": "freshdag-observer-fsatrace",
+      "producer": "freshdag-observer-coarse-reads-example",
       "version": "0.1.0",
       "role": "observer",
       "emits": [
@@ -60,7 +60,7 @@
       "partial": {
         "fs.read": {
           "reason": "over-approximates",
-          "note": "mmap reads are pessimistic: hashed at mmap time"
+          "note": "reads reported at directory granularity; never missed"
         }
       }
     }
