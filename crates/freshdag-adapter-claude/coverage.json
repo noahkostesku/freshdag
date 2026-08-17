@@ -1,4 +1,40 @@
 {
+  "producer": "freshdag-adapter-claude",
+  "version": "0.0.0",
+  "role": "adapter",
+  "platforms": [
+    "any"
+  ],
+  "emits": [
+    "session.*",
+    "computation.*",
+    "tool.*",
+    "fs.read",
+    "fs.write",
+    "diagnostic"
+  ],
+  "partial": {
+    "computation.*": {
+      "reason": "under-approximates",
+      "note": "one Claude Code session is one computation. `computation.started` is emitted only on `SessionStart` with `source: startup`; resume/clear/compact starts emit a `computation-bracket-skipped` diagnostic instead of reopening the bracket, and a hook installed mid-session never produces one at all. The bracket is ASYMMETRIC: `computation.ended` is emitted on every `SessionEnd` with no matching guard, so a resumed session can yield a `computation.ended` with no `computation.started` — adapter-contract §Responsibilities #2 asks for exactly one of each. `Task` subagents are NOT sliced into sub-computations under this identity rule."
+    },
+    "fs.*": {
+      "reason": "blind-in-scope",
+      "note": "FILESYSTEM EFFECTS INSIDE `bash` AND `task` INVOCATIONS ARE INVISIBLE TO THIS ADAPTER AND ARE OBSERVER TERRITORY. A hook payload exposes a Bash command line and a Task prompt, never the syscalls they perform. This adapter emits NO fs events for tool_kind `bash` or `task`, which is what lets `Certificate::check_coverage_deficit` force a non-`valid` status when no fs-covering observer is present."
+    },
+    "fs.read": {
+      "reason": "under-approximates",
+      "note": "synthesized ONLY from the `Read` tool's `file_path` input on PreToolUse. Pre-execution intent, not a confirmed effect: a denied or failed Read still produces this event. `size` is a placeholder (`size_observed: false`) and `hash` is absent because the compile path never touches the filesystem. Reads performed by any other means are invisible here."
+    },
+    "fs.write": {
+      "reason": "under-approximates",
+      "note": "synthesized ONLY from `Write`/`Edit`/`MultiEdit`/`NotebookEdit` `file_path` (`notebook_path` for NotebookEdit) inputs on PreToolUse. Pre-execution intent, not a confirmed effect. `mode` is always `truncate` because hook payloads do not reveal prior existence. `size`/`hash` are real only for `Write` (whose input carries the full contents); the edit tools carry `size_observed: false` and no hash."
+    },
+    "tool.completed": {
+      "reason": "under-approximates",
+      "note": "emitted ONLY from `PostToolUse`, which fires only when a tool succeeds. A failed tool call arrives as `PostToolUseFailure`, which this adapter does not yet recognize, so it produces a `tool.invoked` with NO matching `tool.completed`; denied calls, a `PostToolUse` carrying no `tool_name`, and hook timeouts lose it the same way. Where the event IS emitted its fields are degraded: `duration_ms` is always 0 with `duration_observed: false` because hook payloads carry no timing, `is_error: false` means `no error signal was present in tool_response` rather than `the tool succeeded`, and no `causal_inputs` links it to its `tool.invoked` — each hook fires in its own process and this adapter keeps no cross-invocation state, though the normalized `tool_name` is on the payload so a consumer can correlate."
+    }
+  },
   "capabilities": {
     "computation_id_derivation": "freshdag_core::computation::ComputationId::derive",
     "fs_coverage_scope": "tool-input-derived-only",
@@ -30,51 +66,16 @@
     "symlink_resolution": false,
     "transcript_tailing": false
   },
-  "emits": [
-    "session.*",
-    "computation.*",
-    "tool.*",
-    "fs.read",
-    "fs.write",
-    "diagnostic"
-  ],
   "known_limitations": [
     "BASH/TASK BLINDNESS: filesystem, process and network effects inside `Bash` subprocesses and `Task` subagents are invisible to this adapter. It emits tool.invoked with tool_kind `bash`/`task` and NO fs events, so the certificate contract's coverage-deficit rule can see the gap.",
     "THIS ADAPTER IS NOT AN OBSERVER. Its `fs.read`/`fs.write` coverage is derived from tool inputs only. The engine MUST NOT treat this producer as satisfying the fs-coverage requirement of `Certificate::check_coverage_deficit`; a systems observer is still required before a computation that invoked bash/task may be `valid`.",
-    "COMPUTATION IDENTITY GAP: Claude Code exposes no recipe, so `recipe_id_or_hash` is synthesized as `claude-code-session:<session_id>` per the execution-IR contract's fallback clause. `computation.started` carries no `inputs_declared`, and `Computation::recipe_hash` cannot be populated from hook payloads \u2014 which by invariant #9 caps such computations below `valid`.",
+    "COMPUTATION IDENTITY GAP: Claude Code exposes no recipe, so `recipe_id_or_hash` is synthesized as `claude-code-session:<session_id>` per the execution-IR contract's fallback clause. `computation.started` carries no `inputs_declared`, and `Computation::recipe_hash` cannot be populated from hook payloads — which by invariant #9 caps such computations below `valid`.",
     "fs.* events are PRE-EXECUTION INTENT (`observation: pre-execution-intent`), derived from PreToolUse. A tool call denied by permissions or failing at runtime still produces one.",
     "NO TRANSCRIPT TAILING: `transcript_path` is not read, so subagent parenthood is not reconstructed and `tool.completed` carries no `causal_inputs` to its `tool.invoked`. Causal links exist only within a single hook invocation.",
     "`tool.completed.duration_ms` is always 0 (`duration_observed: false`); hook payloads carry no timing.",
     "Paths are canonicalized LEXICALLY against the payload `cwd`. Symlinks are not resolved and `follow_symlink_target` is always absent.",
     "`UserPromptSubmit`, `Stop`, `SubagentStop`, `PreCompact` and `Notification` are recognized but have no canonical IR kind in execution-ir v0.1; each produces an info-severity `unmapped-hook-event` diagnostic rather than a silent drop.",
-    "The coverage override is a list of event-kind patterns supplied on the command line or via the environment, not the override *file* named by the adapter contract's \u00a7Configuration."
-  ],
-  "partial": {
-    "computation.*": {
-      "reason": "under-approximates",
-      "note": "one Claude Code session is one computation. `computation.started` is emitted only on `SessionStart` with `source: startup`; resume/clear/compact starts emit a `computation-bracket-skipped` diagnostic instead of reopening the bracket. `Task` subagents are NOT sliced into sub-computations under this identity rule."
-    },
-    "fs.*": {
-      "reason": "blind-in-scope",
-      "note": "FILESYSTEM EFFECTS INSIDE `bash` AND `task` INVOCATIONS ARE INVISIBLE TO THIS ADAPTER AND ARE OBSERVER TERRITORY. A hook payload exposes a Bash command line and a Task prompt, never the syscalls they perform. This adapter emits NO fs events for tool_kind `bash` or `task`, which is what lets `Certificate::check_coverage_deficit` force a non-`valid` status when no fs-covering observer is present."
-    },
-    "fs.read": {
-      "reason": "under-approximates",
-      "note": "synthesized ONLY from the `Read` tool's `file_path` input on PreToolUse. Pre-execution intent, not a confirmed effect: a denied or failed Read still produces this event. `size` is a placeholder (`size_observed: false`) and `hash` is absent because the compile path never touches the filesystem. Reads performed by any other means are invisible here."
-    },
-    "fs.write": {
-      "reason": "under-approximates",
-      "note": "synthesized ONLY from `Write`/`Edit`/`MultiEdit`/`NotebookEdit` `file_path` (`notebook_path` for NotebookEdit) inputs on PreToolUse. Pre-execution intent, not a confirmed effect. `mode` is always `truncate` because hook payloads do not reveal prior existence. `size`/`hash` are real only for `Write` (whose input carries the full contents); the edit tools carry `size_observed: false` and no hash."
-    },
-    "tool.completed": {
-      "reason": "over-approximates",
-      "note": "`duration_ms` is always 0 with `duration_observed: false` \u2014 Claude Code hook payloads carry no timing. `is_error: false` means `no error signal was present in tool_response`, not `the tool succeeded`. No `causal_inputs` links a tool.completed to its tool.invoked: each hook fires in its own process and this adapter keeps no cross-invocation state; the normalized `tool_name` is carried on the payload so a consumer can correlate."
-    }
-  },
-  "platforms": [
-    "any"
-  ],
-  "producer": "freshdag-adapter-claude",
-  "role": "adapter",
-  "version": "0.0.0"
+    "The coverage override is a list of event-kind patterns supplied on the command line or via the environment, not the override *file* named by the adapter contract's §Configuration.",
+    "FAILED AND DENIED TOOL CALLS PRODUCE NO `tool.completed`. `PostToolUseFailure` and `PermissionDenied` are not recognized by `HookEvent::parse`; they fall to an info-severity `unknown-hook-event` diagnostic. Nothing is silently dropped, but the completion event itself is absent, which is why `tool.completed` declares `under-approximates`. Mapping them is follow-up work."
+  ]
 }

@@ -122,30 +122,62 @@ fn partial_notes() -> BTreeMap<String, PartialCoverage> {
              fs-covering observer is present.",
         ),
     );
-    // Degraded fields on events that are all still emitted: coarser than
-    // reality, never missing. That is the `over-approximates` row.
+    // Real completions go unemitted, so this is `under-approximates`.
+    //
+    // It was briefly `over-approximates` — the only discharging reason
+    // in this manifest — on the claim that every event is still emitted,
+    // merely coarser. That claim is false. `tool.completed` is emitted
+    // from exactly one site, reached only from `HookEvent::PostToolUse`,
+    // and `PostToolUse` fires only when a tool *succeeds*. Failures
+    // arrive as `PostToolUseFailure`, which `HookEvent::parse` does not
+    // recognize, so every failed tool call in this adapter's stream is a
+    // `tool.invoked` with no `tool.completed`. That is the error path,
+    // not a corner case. Denied calls, a `PostToolUse` carrying no
+    // `tool_name`, and hook timeouts lose it too.
+    //
+    // Nothing compensates in the other direction: `PostToolUse` cannot
+    // fire for a completion that did not happen. The degraded fields the
+    // note describes are an under-report of detail, and the absent
+    // `causal_inputs` is a missing edge — under-approximation in the
+    // most literal sense. The entry is not mixed-direction at all, so
+    // the fail-unsafe tie-break above is not even needed to decide it.
     m.insert(
         "tool.completed".to_string(),
         PartialCoverage::new(
-            PartialReason::OverApproximates,
-            "`duration_ms` is always 0 with `duration_observed: false` — Claude Code hook \
-             payloads carry no timing. `is_error: false` means `no error signal was present \
-             in tool_response`, not `the tool succeeded`. No `causal_inputs` links a \
-             tool.completed to its tool.invoked: each hook fires in its own process and this \
-             adapter keeps no cross-invocation state; the normalized `tool_name` is carried \
-             on the payload so a consumer can correlate.",
+            PartialReason::UnderApproximates,
+            "emitted ONLY from `PostToolUse`, which fires only when a tool succeeds. A failed \
+             tool call arrives as `PostToolUseFailure`, which this adapter does not yet \
+             recognize, so it produces a `tool.invoked` with NO matching `tool.completed`; \
+             denied calls, a `PostToolUse` carrying no `tool_name`, and hook timeouts lose it \
+             the same way. Where the event IS emitted its fields are degraded: `duration_ms` \
+             is always 0 with `duration_observed: false` because hook payloads carry no \
+             timing, `is_error: false` means `no error signal was present in tool_response` \
+             rather than `the tool succeeded`, and no `causal_inputs` links it to its \
+             `tool.invoked` — each hook fires in its own process and this adapter keeps no \
+             cross-invocation state, though the normalized `tool_name` is on the payload so a \
+             consumer can correlate.",
         ),
     );
     // A resumed, cleared or compacted session emits no `computation.started`
-    // at all — a missing event, not a coarse one.
+    // at all — a missing event, not a coarse one. The bracket is also
+    // asymmetric: `compile_session_end` emits `computation.ended`
+    // unconditionally while `compile_session_start` guards on
+    // `source == "startup"`, so an unmatched `computation.ended` is
+    // reachable. That errs in the other direction and is declared rather
+    // than netted out.
     m.insert(
         "computation.*".to_string(),
         PartialCoverage::new(
             PartialReason::UnderApproximates,
             "one Claude Code session is one computation. `computation.started` is emitted \
              only on `SessionStart` with `source: startup`; resume/clear/compact starts emit \
-             a `computation-bracket-skipped` diagnostic instead of reopening the bracket. \
-             `Task` subagents are NOT sliced into sub-computations under this identity rule.",
+             a `computation-bracket-skipped` diagnostic instead of reopening the bracket, and \
+             a hook installed mid-session never produces one at all. The bracket is \
+             ASYMMETRIC: `computation.ended` is emitted on every `SessionEnd` with no matching \
+             guard, so a resumed session can yield a `computation.ended` with no \
+             `computation.started` — adapter-contract §Responsibilities #2 asks for exactly \
+             one of each. `Task` subagents are NOT sliced into sub-computations under this \
+             identity rule.",
         ),
     );
     m
@@ -234,6 +266,12 @@ fn known_limitations() -> Vec<String> {
         "The coverage override is a list of event-kind patterns supplied on the command \
          line or via the environment, not the override *file* named by the adapter \
          contract's §Configuration."
+            .to_string(),
+        "FAILED AND DENIED TOOL CALLS PRODUCE NO `tool.completed`. `PostToolUseFailure` and \
+         `PermissionDenied` are not recognized by `HookEvent::parse`; they fall to an \
+         info-severity `unknown-hook-event` diagnostic. Nothing is silently dropped, but the \
+         completion event itself is absent, which is why `tool.completed` declares \
+         `under-approximates`. Mapping them is follow-up work."
             .to_string(),
     ]
 }
