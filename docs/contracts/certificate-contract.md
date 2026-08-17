@@ -85,8 +85,18 @@ that shared certificates cannot be silently rewritten.
     "reasons":  []                    // populated when not "valid"
   },
   "observation_coverage": [
-    { "producer": "freshdag-adapter-claude", "version": "0.1.0" },
+    { "producer": "freshdag-adapter-claude", "version": "0.1.0",
+      "role": "adapter", "emits": ["tool.*", "fs.read", "fs.write"],
+      "partial": {
+        "fs.*": { "reason": "blind-in-scope",
+                  "note": "no visibility inside bash/task subprocesses" }
+      } },
     { "producer": "freshdag-observer-fsatrace", "version": "0.1.0",
+      "role": "observer", "emits": ["fs.read", "fs.write"],
+      "partial": {
+        "fs.read": { "reason": "over-approximates",
+                     "note": "mmap reads hashed at mmap time" }
+      },
       "known_limitations": ["glibc only"] }
   ]
 }
@@ -113,6 +123,11 @@ that shared certificates cannot be silently rewritten.
 - **`observation_coverage`** lists every producer that contributed to
   the certificate, with its coverage manifest version so downstream
   consumers can interpret silences.
+- **`observation_coverage[].partial`** mirrors the producer's coverage
+  manifest and MUST be carried onto the certificate, not summarized or
+  dropped. A certificate that omits its producers' declared blindness
+  cannot be re-checked by a third party, because the one fact that
+  would flip the verdict is not in the document. See §Partial Coverage.
 
 ### Reason Codes
 
@@ -206,21 +221,60 @@ corresponding observer producer in `observation_coverage`,
 `status.value` MUST NOT be `valid`. This turns invariant #7 into a
 machine-checked property of the certificate.
 
-**Only an observer discharges the bash/task obligation.** Each entry in
-`observation_coverage` declares a `role` (`adapter` | `observer` |
-`probe`). A `tool.invoked` of kind `bash` or `task` creates an
-observation obligation that ONLY a producer with `role: "observer"`
-declaring `fs.*` coverage can discharge. An adapter that declares
-`fs.read`/`fs.write` does NOT discharge it, however broad its `emits`
-list: adapters synthesize filesystem events from tool inputs they can
-see, and are blind inside subprocesses by construction. This is why the
-adapter contract's own coverage example pairs `fs.read` with the partial
-note "only from Read tool; subprocess reads via observer" — that note
-describes a producer that cannot answer the question this rule asks.
+**Only an observer discharges the bash/task obligation, and only one
+that claims to see reads.** A `tool.invoked` of kind `bash` or `task`
+creates an observation obligation. A producer discharges it iff all
+three hold:
+
+1. `role == "observer"`. An adapter that declares `fs.read`/`fs.write`
+   does NOT discharge it, however broad its `emits` list: adapters
+   synthesize filesystem events from tool inputs they can see, and are
+   blind inside subprocesses by construction.
+2. `emits` covers **`fs.read`** specifically. Not `fs.write`, and not
+   "either one." Validity is about *inputs*: a producer that sees only
+   writes contributes zero dependency edges, so it cannot answer the
+   question this rule asks even in principle.
+3. Its `partial` declaration for `fs.read`, if any, is
+   `over-approximates`. See §Partial Coverage.
 
 This is why v0 on macOS (no observer) reports `unknown` — not `valid` —
 on any computation that invoked `Bash`. That is correct behaviour, not
 a defect.
+
+### Partial Coverage
+
+`observation_coverage[].partial` maps an event-kind pattern to a
+**closed** reason plus a free-text note:
+
+| `reason` | Meaning | Discharges an obligation? |
+| --- | --- | --- |
+| `over-approximates` | May report events that did not happen, or report them more coarsely than reality. Never misses one. | **Yes** |
+| `under-approximates` | May miss real events of this kind. | **No** |
+| `blind-in-scope` | Structurally cannot observe this kind in some scope (e.g. inside subprocesses). | **No** |
+
+The direction of the error is the whole criterion. Over-approximation
+produces spurious *dependencies*, hence spurious staleness, which
+invariant #15 explicitly prefers; under-approximation and blindness
+produce spurious *freshness*, which invariant #7 forbids. This is why
+"any partial note disqualifies" is wrong: the reference observer
+legitimately over-approximates (mmap reads), and under a blunt rule
+nothing could ever discharge anything.
+
+`note` is **non-normative**, under the same rules as
+`status.reasons[].detail`: no consumer may branch on it, it MUST be
+deterministic (it is inside the `cert_id` preimage), and it MUST NOT
+carry secrets. Deciding from the note rather than the reason is the
+free-text mistake ADR 0006 exists to end.
+
+A `partial` value MAY also be a bare string, which is the pre-ADR-0011
+shape and is read as `under-approximates`. Unknown and legacy input
+lands on "does not discharge" on purpose: a producer that deserves to
+discharge must say so explicitly, and defaulting the other way is a
+silent-wrong-answer generator on the invariant-#7 path.
+
+When several `partial` keys match a kind (say `fs.*` and `fs.read`),
+**every** match must discharge. A producer cannot annotate its way out
+of its own broadest admission with a narrower entry.
 
 ## Certificate Update Semantics
 
@@ -248,6 +302,14 @@ referenced.
 - Branching on `status.reasons[].detail` to make a validity decision.
 - Encoding a new reason code inside `detail` instead of extending the
   `ReasonCode` enum through the contract-change process.
+- Reporting `valid` on a computation that invoked `bash`/`task` when
+  the only observer covering `fs.read` declares itself
+  `under-approximates` or `blind-in-scope` for it.
+- Dropping `observation_coverage[].partial` when writing a certificate,
+  which makes the coverage-deficit rule uncheckable by anyone who does
+  not have the producing store.
+- Branching on `observation_coverage[].partial.*.note`, or classifying
+  a producer's fidelity by pattern-matching that prose.
 - Discharging a `bash`/`task` coverage obligation with an adapter's
   `fs.*` declaration rather than an observer's.
 
@@ -277,6 +339,17 @@ fields) continue to land in place.
 
 ### Changelog
 
+- **v0.1 — Wave 2 Phase B.** `observation_coverage[].partial` added:
+  present in the producer's coverage manifest all along, but dropped at
+  the manifest→certificate boundary, which made the coverage-deficit
+  rule uncheckable from the certificate alone. Each value narrowed from
+  a free-form note to a closed `reason` (`over-approximates` |
+  `under-approximates` | `blind-in-scope`) plus a non-normative `note`;
+  the bare-string form still parses and reads as `under-approximates`.
+  The bash/task obligation now requires `fs.read` specifically, rather
+  than `fs.read` or `fs.write`. Additive on the wire; certificates that
+  were `valid` behind a self-declaredly-blind observer, or behind an
+  `fs.write`-only observer, become `unknown`. See ADR 0011.
 - **v0.1 — Wave 2 Phase A.** `status.reasons[].reason` narrowed from a
   free-form string to the closed `ReasonCode` enum; wire form changed
   from snake_case to kebab-case; optional `status.reasons[].detail`
