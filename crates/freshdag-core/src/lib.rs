@@ -16,6 +16,7 @@ pub mod artifact;
 pub mod certificate;
 pub mod computation;
 pub mod dependency;
+pub mod determinism;
 pub mod ir;
 pub mod probe;
 

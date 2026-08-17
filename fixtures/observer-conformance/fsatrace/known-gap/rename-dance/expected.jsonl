@@ -1,1 +1,1 @@
-{"event_id":"00000000-0000-0000-0000-000000000001","producer":"freshdag-observer-fsatrace","producer_version":"0.0.0-conformance","session_id":"conformance-session","ts":"2026-01-01T00:00:00Z","kind":"fs.write","payload":{"mode":"truncate","path":"/repo/brief.md.tmp","size":0}}
+{"event_id":"019b76da-a800-7000-8000-000000000001","producer":"freshdag-observer-fsatrace","producer_version":"0.0.0-conformance","session_id":"conformance-session","ts":"2026-01-01T00:00:00Z","kind":"fs.write","payload":{"mode":"truncate","path":"/repo/brief.md.tmp","size":0}}
