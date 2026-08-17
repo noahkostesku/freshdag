@@ -36,7 +36,7 @@
 //! ## Deviation from the contract's sketch, deliberately
 //!
 //! The contract sketches `first_seen: Instant`. This module stores an
-//! [`OffsetDateTime`] taken from the injected [`Clock`](crate::Clock)
+//! [`OffsetDateTime`] taken from the injected [`EvalClock`](crate::EvalClock)
 //! instead. `Instant` is unmockable, and a test that cannot control
 //! time is nondeterministic, which `.claude/rules/testing.md` forbids.
 //! The field is otherwise used exactly as sketched.

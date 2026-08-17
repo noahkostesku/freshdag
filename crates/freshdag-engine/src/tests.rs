@@ -22,7 +22,9 @@ use freshdag_core::dependency::{
 use freshdag_core::ir::{EventKind, ProducerRole};
 use freshdag_core::probe::ProbeResult;
 
-use crate::{Clock, Engine, EngineError, FixedClock, ProbeIdentity, ProbeRegistry, ScriptedProbe};
+use crate::{
+    Engine, EngineError, EvalClock, FrozenClock, ProbeIdentity, ProbeRegistry, ScriptedProbe,
+};
 
 use support::{blake3_of, Fixture};
 
@@ -1627,8 +1629,8 @@ fn status_checked_comes_from_the_injected_clock() {
 fn _assert_engine_is_send_sync() {
     fn require<T: Send + Sync>() {}
     require::<Engine>();
-    require::<FixedClock>();
+    require::<FrozenClock>();
     let _: fn() = || {
-        let _ = <FixedClock as Clock>::now;
+        let _ = <FrozenClock as EvalClock>::now;
     };
 }
