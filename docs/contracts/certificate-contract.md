@@ -157,11 +157,11 @@ empty string `""` (not `null`, not omitted).
 | Code | Scope | Meaning |
 | --- | --- | --- |
 | `drift` | edge | A probe observed a fingerprint different from the recorded one. |
-| `probe-unknown` | edge | A probe ran and could not decide. |
+| `probe-unknown` | edge | A probe ran and could not decide, so it contributed no evidence. Distinct from `no-probe-available`, which asserts none ran. Usually accompanies an `unknown` edge; on a `volatile` edge inside a validated TTL the edge is `likely-valid` instead, because the TTL survives where the probe said nothing — and `--accept-likely-valid` does not lift that to exit 0. |
 | `no-probe-available` | edge | No probe could be selected: none registered for the scheme, registration failed, arbitration tied, or the probe that recorded the fingerprint was removed (probe-contract §Anti-thrash Protocol, "Probe removal"). Distinct from `probe-unknown`, which asserts a probe executed. |
 | `trust-class-heuristic-caps-at-likely-valid` | edge | The edge matched, but at `heuristic` trust; invariant #8 forbids reporting it as `valid`. |
 | `trust-class-volatile-caps-at-likely-valid` | edge | A probe **ran and matched** on a `volatile` edge inside its TTL. |
-| `volatile-within-ttl-unprobed` | edge | A `volatile` edge is inside a validated TTL and **no probe ran** — none registered for the scheme, arbitration tied, the probe was removed, or a probe ran and could not decide. Same verdict as the row above on strictly weaker evidence, which is why it is a separate code. `--accept-likely-valid` does not lift an artifact carrying this code to exit 0: the flag accepts a checked-but-heuristic result, and nothing checked this. |
+| `volatile-within-ttl-unprobed` | edge | A `volatile` edge is inside a validated TTL and **no probe was consulted** — none registered for the scheme, arbitration tied, or the probe was removed. A probe that ran and could not decide is `probe-unknown`, not this: this code's name and ADR 0009 §Decision 2's emission condition both say *unprobed*. Same verdict as `trust-class-volatile-caps-at-likely-valid` on strictly weaker evidence. `--accept-likely-valid` does not lift an artifact carrying this code to exit 0. |
 | `ttl-expired` | edge | A `volatile` edge's TTL elapsed without re-observation. |
 | `probe-trust-demoted` | edge | The signal backing the recorded trust class disappeared; the engine emitted a `probe.trust_demoted` diagnostic and forced re-observation. |
 | `coverage-deficit` | artifact | Effects occurred that no producer in `observation_coverage` claims to cover. |

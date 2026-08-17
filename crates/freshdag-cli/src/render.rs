@@ -53,8 +53,8 @@ fn prose(code: ReasonCode) -> &'static str {
         }
         ReasonCode::ProbeUnknown => {
             "A probe ran for this dependency but could not decide whether it\n\
-             changed. An unverified dependency is reported as unknown, never\n\
-             as fresh."
+             changed, so it contributed no evidence either way. Nothing here\n\
+             is treated as proof the dependency is unchanged."
         }
         ReasonCode::NoProbeAvailable => {
             "No probe answered for this dependency, so it was never checked:\n\

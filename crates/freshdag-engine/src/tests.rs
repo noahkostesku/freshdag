@@ -627,6 +627,54 @@ fn skew_inside_the_tolerance_is_still_evidence() {
 /// `evaluate_edge` — no probe registered, arbitration tie, probe
 /// uninstalled, `Match`, and `Unknown` at both values of `retryable` —
 /// is asserted to agree.
+/// The probed and unprobed volatile scenarios must agree on `value`.
+///
+/// ADR 0009 Amendment 2's central guarantee: registering a probe cannot
+/// by itself move a volatile edge's verdict — only positive drift
+/// evidence can. `fixtures/scenarios/volatile-external-dep` and
+/// `-probed` are that pair, and until W9.1 they pinned it by having
+/// byte-identical expected blocks, with both fixtures' notes saying so.
+///
+/// W9.1 split their reason codes, which is correct — same verdict,
+/// different evidence — and in doing so silently dissolved the pin: the
+/// blocks stopped being identical and nothing asserted the `value`
+/// fields still agreed. A note claiming an identity that no longer held
+/// was the only thing left. This asserts the surviving half directly,
+/// because a note is not a test.
+#[test]
+fn the_probed_and_unprobed_volatile_arms_agree_on_the_verdict() {
+    let root = crate::tests::harness::scenarios_root();
+    let read = |name: &str| -> serde_json::Value {
+        let path = root.join(name).join("scenario.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{name} parses: {e}"))
+    };
+
+    let unprobed = read("volatile-external-dep");
+    let probed = read("volatile-external-dep-probed");
+
+    let value = |v: &serde_json::Value| v["expected"]["certificate_status"]["value"].clone();
+    assert_eq!(
+        value(&unprobed),
+        value(&probed),
+        "registering a probe moved a volatile edge's verdict; ADR 0009 \
+         Amendment 2 permits only positive drift evidence to do that"
+    );
+
+    // And the reasons must differ, or W9.1's split has been undone and
+    // the certificate is back to claiming a probe checked what nothing
+    // checked.
+    let reasons =
+        |v: &serde_json::Value| v["expected"]["certificate_status"]["reason_codes"].clone();
+    assert_ne!(
+        reasons(&unprobed),
+        reasons(&probed),
+        "the two arms carry the same reason code again; same verdict on \
+         different evidence must still say which evidence"
+    );
+}
+
 #[test]
 fn every_non_drift_outcome_gives_a_volatile_edge_the_same_verdict() {
     let fingerprint = format!("blake3:{}", blake3_of("volatile"));
@@ -714,14 +762,22 @@ fn every_non_drift_outcome_gives_a_volatile_edge_the_same_verdict() {
     // that ran and agreed is evidence; no probe at all is a declared
     // lifetime and nothing else. Same verdict, different grounds, and
     // the certificate has to say which (ADR 0009).
-    let probed = ReasonCode::TrustClassVolatileCapsAtLikelyValid;
-    let unprobed = ReasonCode::VolatileWithinTtlUnprobed;
+    // Three distinct evidence states behind one verdict, and the
+    // certificate must name which. An earlier revision of this test
+    // asserted only two, folding "a probe ran and could not decide" in
+    // with "no probe was consulted" — which made the CLI tell users
+    // NOTHING CHECKED THIS DEPENDENCY about an edge whose probe had
+    // just answered, and widened ADR 0009 §Decision 2's emission
+    // condition ("no probe was consulted") without saying so.
     let expected_reason = |label: &str| match label {
-        "probe matched" | "probe matched, reporting a higher class" => probed,
-        // Probe `Unknown` lands with the unprobed cases on purpose: a
-        // probe that ran and could not decide supplied no evidence, so
-        // the validated TTL is still all there is.
-        _ => unprobed,
+        // A probe ran and agreed: evidence, capped by trust class.
+        "probe matched" | "probe matched, reporting a higher class" => {
+            ReasonCode::TrustClassVolatileCapsAtLikelyValid
+        }
+        // A probe ran and could not decide: consulted, no evidence.
+        "probe unknown, retryable" | "probe unknown, unretryable" => ReasonCode::ProbeUnknown,
+        // Nothing was consulted at all.
+        _ => ReasonCode::VolatileWithinTtlUnprobed,
     };
     for (label, (_, reasons)) in &outcomes {
         assert_eq!(
