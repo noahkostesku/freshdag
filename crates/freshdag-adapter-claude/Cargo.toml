@@ -16,6 +16,12 @@ path = "src/bin/freshdag-claude-hook.rs"
 
 [dependencies]
 freshdag-core.workspace = true
+# For publishing this adapter's coverage manifest into a store's
+# `coverage.jsonl` (adapter-contract §Required Behavior 4). The event
+# hot path deliberately does NOT go through the store: it keeps this
+# crate's own buffered sink, which carries the never-block guarantee
+# adapter-contract §Errors and Backpressure requires.
+freshdag-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

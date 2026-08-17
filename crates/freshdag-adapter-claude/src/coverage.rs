@@ -28,9 +28,63 @@ pub fn coverage_manifest() -> CoverageManifest {
 }
 
 /// The manifest for a given adapter configuration.
+///
+/// **Suppression narrows the manifest.** `AdapterConfig::suppressed_kinds`
+/// stops events reaching the sink, so a manifest that still declared
+/// those kinds would tell a consumer "I cover this" about a signal the
+/// consumer will never see — and silence under a covered kind reads as
+/// `ObservedAbsent`, not `Unobserved`. That is the fail-*open* direction:
+/// it would let a suppressed adapter's silence look like evidence that
+/// nothing happened.
+///
+/// The narrowing is deliberately **coarse**: any declared pattern that
+/// *intersects* a suppression pattern is dropped whole, even when the
+/// suppression covers only part of it. Dropping too much under-claims
+/// coverage, which fails safe — an unclaimed kind's silence is
+/// `Unobserved`, which caps the artifact at `unknown` rather than
+/// licensing `valid`.
 #[must_use]
 pub fn coverage_manifest_for(config: &AdapterConfig) -> CoverageManifest {
-    manifest_with_version(&config.producer_version, &config.identity_rule_version)
+    let mut manifest =
+        manifest_with_version(&config.producer_version, &config.identity_rule_version);
+    if config.suppressed_kinds.is_empty() {
+        return manifest;
+    }
+
+    manifest.emits.retain(|declared| {
+        !config
+            .suppressed_kinds
+            .iter()
+            .any(|s| patterns_intersect(declared, s))
+    });
+    // A partial-coverage note about a kind this build no longer emits
+    // describes nothing. Drop those with the kinds they annotate.
+    manifest.partial.retain(|kind, _| {
+        let declared = EventKindPattern::new(kind.clone());
+        !config
+            .suppressed_kinds
+            .iter()
+            .any(|s| patterns_intersect(&declared, s))
+    });
+    manifest
+}
+
+/// Could these two patterns ever match the same concrete event kind?
+///
+/// Both forms are either an exact wire string or a `prefix.*` glob, so
+/// this is decidable without enumerating `EventKind` — which matters
+/// because enumerating it would mean adding an `ALL` to a core IR enum,
+/// and those are contract-change surface.
+fn patterns_intersect(a: &EventKindPattern, b: &EventKindPattern) -> bool {
+    match (a.as_str().strip_suffix(".*"), b.as_str().strip_suffix(".*")) {
+        // Two globs overlap when either prefix contains the other.
+        (Some(pa), Some(pb)) => pa.starts_with(pb) || pb.starts_with(pa),
+        // A glob and an exact kind overlap when the kind is under it.
+        (Some(pa), None) => b.as_str().starts_with(pa) && b.as_str()[pa.len()..].starts_with('.'),
+        (None, Some(pb)) => a.as_str().starts_with(pb) && a.as_str()[pb.len()..].starts_with('.'),
+        // Two exact kinds overlap only when equal.
+        (None, None) => a.as_str() == b.as_str(),
+    }
 }
 
 fn manifest_with_version(version: &str, identity_rule: &str) -> CoverageManifest {
