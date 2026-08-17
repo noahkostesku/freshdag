@@ -53,6 +53,23 @@ fixtures live under `illegal/` with `"invariant_check": "pass"`.
   context only (probe failure text, HTTP status). No decision may key
   off it.
 
+### Producer names here are illustrative, never descriptive
+
+Fixture manifests describe the *shape* a producer may declare. They are
+not factual claims about anything in `crates/`, and no ADR, engine
+branch, test, or review may cite one as evidence of what a shipped
+producer declares — cite the source file (ADR 0011, Amendment,
+Ruling 5).
+
+Every synthetic producer is therefore named for the behaviour it
+illustrates and suffixed `-example`
+(`freshdag-observer-coarse-reads-example`, not
+`freshdag-observer-fsatrace`). Reusing a real producer string is what
+led ADR 0011 to assert that the fsatrace observer over-approximates
+when `crates/freshdag-observer/src/linux.rs` declares the opposite.
+A fixture asserting that some observer discharges must not be readable
+as asserting that *ours* does.
+
 ## The load-bearing rule
 
 **Do not change core types to make an `illegal/` fixture pass.** The
@@ -81,7 +98,10 @@ Positive:
   coverage is `over-approximates` DOES discharge a `bash` obligation.
   This is the fixture that keeps the coverage-deficit rule from being
   inert: over-reporting costs spurious staleness (invariant #15's
-  stated preference), never spurious freshness.
+  stated preference), never spurious freshness. The observer is
+  hypothetical: no in-tree producer is currently known to qualify as
+  `over-approximates` (ADR 0011, Amendment, Correction 3), so this
+  fixture pins headroom in the rule, not present behaviour.
 
 Illegal:
 

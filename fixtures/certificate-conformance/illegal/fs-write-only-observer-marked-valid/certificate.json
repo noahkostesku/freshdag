@@ -50,7 +50,7 @@
       }
     },
     {
-      "producer": "freshdag-observer-writes-only",
+      "producer": "freshdag-observer-writes-only-example",
       "version": "0.1.0",
       "role": "observer",
       "emits": [

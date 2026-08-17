@@ -50,7 +50,7 @@
       }
     },
     {
-      "producer": "freshdag-observer-fsatrace",
+      "producer": "freshdag-observer-subprocess-blind-example",
       "version": "0.1.0",
       "role": "observer",
       "emits": [
