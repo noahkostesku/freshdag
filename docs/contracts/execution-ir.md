@@ -28,7 +28,7 @@ Every event carries:
 ```
 {
   "event_id":     "uuid-v7 (monotonic-ish per producer)",
-  "producer":     "adapter-claude" | "observer-fsatrace" | "probe-http" | ...,
+  "producer":     "freshdag-adapter-<runtime>" | "freshdag-observer-<backend>" | "freshdag-probe-<scheme>",
   "producer_version": "semver",
   "session_id":   "opaque, stable across an execution",
   "computation_id?": "opaque, stable across a computation (may span sessions)",
@@ -40,6 +40,19 @@ Every event carries:
 ```
 
 - `event_id` is UUIDv7 so ordering is derivable without a central clock.
+- **`producer` is matched by exact string, so the shape above is
+  load-bearing rather than decorative.**
+  `Certificate::check_coverage_deficit` builds a set of the producers
+  named in `observation_coverage` and rejects any event whose `producer`
+  is not literally in it — `producer-missing-from-coverage`, and the
+  computation's silences become uninterpretable. An earlier revision of
+  this block wrote `"adapter-claude" | "observer-fsatrace" |
+  "probe-http"`, none of which is a string any in-tree producer emits;
+  a reader copying it would have produced events that fail to attribute.
+  The real values are the crate names: `freshdag-adapter-claude`,
+  `freshdag-observer-fsatrace`, `freshdag-probe-file`. The placeholders
+  above are angle-bracketed so they cannot be mistaken for literals
+  (ADR 0011, Amendment, Ruling 5).
 - `session_id` is defined by the adapter; consumers treat it as opaque.
 - `computation_id` may be absent for infrastructural events (e.g., a
   session-level probe) but is required for any event contributing to a
