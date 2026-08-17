@@ -33,7 +33,11 @@ mod hash;
 mod kind;
 mod payload;
 
-pub use coverage::{CoverageManifest, EventKindPattern, ProducerRole};
+pub(crate) use coverage::declares_dischargeable;
+pub use coverage::{
+    ALL_PARTIAL_REASONS, CoverageManifest, EventKindPattern, PartialCoverage, PartialReason,
+    ProducerRole,
+};
 pub use envelope::IrEvent;
 pub use hash::{Hash, HashAlgo, HashParseError};
 pub use kind::EventKind;
