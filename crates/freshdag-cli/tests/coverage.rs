@@ -285,6 +285,9 @@ fn uncomputable_metrics_are_named_not_approximated() {
         "wall time saved",
         "$ saved",
         "undeclared-dep catch count",
+        // Withdrawn after review: the store does not attribute edges to
+        // producers, so the documented definition cannot be computed.
+        "coverage silence rate",
     ] {
         let line = text
             .lines()
@@ -295,6 +298,114 @@ fn uncomputable_metrics_are_named_not_approximated() {
             "`{metric}` must be named as not computable, got: {line}"
         );
     }
+}
+
+/// Only `builtin` tools can yield filesystem evidence. `mcp`, `skill`,
+/// and a `tool.invoked` carrying no `tool_kind` at all produce none —
+/// counting them as observable credits the adapter for evidence it never
+/// produced, and biases the headline ratio optimistic.
+#[test]
+fn non_builtin_tool_kinds_all_count_as_blind() {
+    let root = target_tmp().join("kinds");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("root");
+    let store_dir = root.join(".freshdag");
+    let mut store = Store::open(&store_dir).expect("open");
+    store
+        .register_producer(manifest(ADAPTER, ProducerRole::Adapter, &["tool.*"]))
+        .expect("register");
+
+    for (i, payload) in [
+        serde_json::json!({"tool_kind": "mcp", "tool_name": "mcp__x__y"}),
+        serde_json::json!({"tool_kind": "skill", "tool_name": "s"}),
+        serde_json::json!({"tool_name": "mystery"}),
+        serde_json::json!({"tool_kind": "builtin", "tool_name": "Read"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(
+            store
+                .append(&event(i as u128, EventKind::ToolInvoked, payload))
+                .expect("append"),
+            AppendOutcome::Appended
+        );
+    }
+    store.sync().expect("sync");
+
+    let r = report(&store_dir);
+    assert_eq!(r["total_tool_calls"], 4);
+    assert_eq!(
+        r["blind_tool_calls"], 3,
+        "only the builtin call can yield fs evidence; got {r}"
+    );
+}
+
+/// Dischargeability is decided per computation, exactly as the engine
+/// decides it. `OR`-ing a single flag across the store made one
+/// computation's observer vouch for another's, so the report claimed
+/// "dischargeable" while `check` reported `coverage-deficit` on the same
+/// data — optimistic, and contradicting the tool it describes.
+#[test]
+fn dischargeable_requires_every_obligated_computation_to_be_covered() {
+    let root = target_tmp().join("per-comp");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("root");
+    let store_dir = root.join(".freshdag");
+    let mut store = Store::open(&store_dir).expect("open");
+    store
+        .register_producer(manifest(
+            ADAPTER,
+            ProducerRole::Adapter,
+            &["tool.*", "fs.read"],
+        ))
+        .expect("register adapter");
+    store
+        .register_producer(manifest(
+            OBSERVER,
+            ProducerRole::Observer,
+            &["fs.read", "fs.write"],
+        ))
+        .expect("register observer");
+
+    // comp:A raises an obligation and has NO observer contribution.
+    let mut a = event(
+        0,
+        EventKind::ToolInvoked,
+        serde_json::json!({"tool_kind": "bash", "tool_name": "bash"}),
+    );
+    a.computation_id = Some("comp:A".to_string());
+    assert_eq!(store.append(&a).expect("append"), AppendOutcome::Appended);
+
+    // comp:B raises one and the observer did contribute.
+    let mut b = event(
+        1,
+        EventKind::ToolInvoked,
+        serde_json::json!({"tool_kind": "bash", "tool_name": "bash"}),
+    );
+    b.computation_id = Some("comp:B".to_string());
+    assert_eq!(store.append(&b).expect("append"), AppendOutcome::Appended);
+    let mut obs = event_from(
+        OBSERVER,
+        2,
+        EventKind::FsRead,
+        serde_json::json!({
+            "path": "/tmp/seen-by-observer.txt", "size": 1,
+            "hash": "blake3:3333333333333333333333333333333333333333333333333333333333333333",
+            "read_kind": "direct", "impure": false,
+        }),
+    );
+    obs.computation_id = Some("comp:B".to_string());
+    assert_eq!(store.append(&obs).expect("append"), AppendOutcome::Appended);
+    store.sync().expect("sync");
+
+    let r = report(&store_dir);
+    assert_eq!(r["computations_with_obligations"], 2);
+    assert_eq!(r["computations_with_dischargeable_obligations"], 1);
+    assert_eq!(
+        r["obligations_dischargeable"], false,
+        "one covered computation must not vouch for an uncovered one"
+    );
 }
 
 /// A report is not a verdict. Whatever it finds, it exits 0 — a low

@@ -168,14 +168,31 @@ impl SeededIdGen {
     /// epoch, a producer tag derived from `producer`, counter starting
     /// at 1.
     ///
-    /// Deterministic in `producer` alone, so goldens are stable, and
-    /// disjoint from every other producer name that derives a different
-    /// tag — which is what keeps two conformant streams from colliding
-    /// in a shared store.
+    /// Deterministic in `producer` alone, so goldens are stable.
     ///
-    /// The tag is never `0`: that value is reserved for
-    /// [`SeededIdGen::conformance`], so a producer can never
-    /// accidentally land in the untagged space.
+    /// # What this does and does not guarantee
+    ///
+    /// The tag is 16 bits, so it **cannot** guarantee global
+    /// disjointness: by pigeonhole two producer names must eventually
+    /// share a tag, and by the birthday bound a collision is findable
+    /// among a few hundred names. An earlier version of this
+    /// documentation, and the commit that introduced it, claimed
+    /// "a disjoint `event_id` space" without qualification. That was
+    /// overstated, and a verifier produced 13 colliding pairs from a
+    /// list of plausible `freshdag-*` names.
+    ///
+    /// What it does guarantee is that **two different names rarely
+    /// collide, and a collision fails safe rather than silently.** Two
+    /// producers sharing a tag emit the same `event_id`s;
+    /// `freshdag_store::order::linearize_checked` detects duplicate
+    /// identifiers globally, `is_deterministic()` goes false, and the
+    /// engine refuses to certify. The outcome is no certificate, not a
+    /// wrong one.
+    ///
+    /// The tag is always in `1..=0xFFFE`. `0` is reserved for
+    /// [`SeededIdGen::conformance`], so a producer can never land in the
+    /// untagged space, and `0xFFFF` is reserved so that no fallback has
+    /// to alias onto a reachable value.
     #[must_use]
     pub fn for_producer(producer: &str) -> Self {
         Self {
@@ -203,12 +220,17 @@ fn producer_tag(producer: &str) -> u16 {
     // than casting.
     let low = (hash ^ (hash >> 16) ^ (hash >> 32) ^ (hash >> 48)).to_le_bytes();
     let folded = u16::from_le_bytes([low[0], low[1]]);
-    // 0 is reserved for the untagged conformance space.
-    if folded == 0 {
-        u16::MAX
-    } else {
-        folded
-    }
+    // Map into `1..=0xFFFE`, leaving 0 reserved for the untagged
+    // conformance space.
+    //
+    // This previously did `if folded == 0 { u16::MAX }`, which was
+    // unsound: `u16::MAX` is a value another producer's fold reaches
+    // natively, so the fallback aliased two distinct names onto one tag
+    // permanently. A verifier found the pair (`"ffzs"` folds to 0 and
+    // was remapped onto `0xFFFF`; `"zub"` folds to `0xFFFF` directly).
+    // Folding a reserved value onto an occupied one is not a fix. Both
+    // endpoints are now unreachable instead.
+    1 + folded % (u16::MAX - 1)
 }
 
 impl Default for SeededIdGen {
@@ -303,12 +325,14 @@ mod tests {
         }
     }
 
-    /// Two producers must never mint the same identifier.
+    /// The producers that actually ship must not collide.
     ///
-    /// This is the property whose absence made two individually
-    /// conformant streams collide: `linearize_checked` detects duplicate
-    /// `event_id`s globally, so a shared counter across producers turned
-    /// a legal ingest into `is_deterministic() == false`.
+    /// Note the scope: this cannot establish disjointness in general —
+    /// a 16-bit tag collides by pigeonhole, and
+    /// `a_tag_collision_shows_up_as_equal_identifiers` pins what happens
+    /// when it does. What this pins is that the names in use today are
+    /// distinct, which is the property the goldens and the live store
+    /// depend on.
     #[test]
     fn different_producers_draw_from_disjoint_id_spaces() {
         let names = [
@@ -365,14 +389,74 @@ mod tests {
         }
     }
 
-    /// The reserved tag has to be unreachable, or a producer could land
-    /// in the untagged space and the disjointness argument collapses.
+    /// Every derived tag lands strictly inside the reserved endpoints.
+    ///
+    /// The old test here asserted `producer_tag(x) != 0` — which the
+    /// function makes structurally impossible, so it could not fail for
+    /// any input and proved nothing. This exercises the fold itself
+    /// across both endpoints.
     #[test]
-    fn no_producer_name_derives_the_reserved_zero_tag() {
-        for i in 0..5_000u32 {
-            assert_ne!(producer_tag(&format!("producer-{i}")), 0);
+    fn every_derived_tag_avoids_both_reserved_values() {
+        let names: Vec<String> = (0..20_000u32)
+            .map(|i| format!("freshdag-producer-{i}"))
+            .chain(["", "a", "freshdag-adapter-claude", "ffzs", "zub"].map(ToString::to_string))
+            .collect();
+        for name in &names {
+            let tag = producer_tag(name);
+            assert!(
+                tag != 0 && tag != u16::MAX,
+                "{name} derived reserved tag {tag:#06x}"
+            );
         }
-        assert_ne!(producer_tag(""), 0);
+    }
+
+    /// The reserved-zero fallback must not alias onto a tag another name
+    /// reaches natively.
+    ///
+    /// It used to: a raw fold of `0` was remapped to `u16::MAX`, which
+    /// is a perfectly reachable fold value, so the two names below
+    /// produced identical identifiers forever. Folding a reserved value
+    /// onto an occupied one is not a fix.
+    #[test]
+    fn the_reserved_tag_fallback_does_not_alias_another_name() {
+        // `ffzs` folds to 0 raw; `zub` folds to 0xFFFF raw. Under the
+        // old mapping both became 0xFFFF.
+        assert_ne!(
+            producer_tag("ffzs"),
+            producer_tag("zub"),
+            "the two names that exposed the aliasing must stay distinct"
+        );
+    }
+
+    /// Two producers that DO collide must fail loudly, not silently.
+    ///
+    /// A 16-bit tag cannot make collisions impossible, so the property
+    /// that matters is what happens when one occurs: identical
+    /// `event_id`s, which the store detects as duplicates and the engine
+    /// refuses to certify over. This pins that a collision is visible as
+    /// equal identifiers rather than as quietly interleaved streams.
+    #[test]
+    fn a_tag_collision_shows_up_as_equal_identifiers() {
+        let mut seen: std::collections::BTreeMap<u16, String> = std::collections::BTreeMap::new();
+        let mut collision: Option<(String, String)> = None;
+        for i in 0..100_000u32 {
+            let name = format!("p{i}");
+            let tag = producer_tag(&name);
+            if let Some(prior) = seen.get(&tag) {
+                collision = Some((prior.clone(), name));
+                break;
+            }
+            seen.insert(tag, name);
+        }
+        let (a, b) = collision.expect(
+            "a 16-bit tag must collide within 100k names; if this fails the tag widened \
+             and this test needs revisiting",
+        );
+        assert_eq!(
+            SeededIdGen::for_producer(&a).next_id(),
+            SeededIdGen::for_producer(&b).next_id(),
+            "colliding producers emit equal ids, which is what the store detects"
+        );
     }
 
     /// The fixed clock advances by its step and never reads the wall

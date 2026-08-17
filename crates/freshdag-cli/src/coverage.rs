@@ -88,8 +88,15 @@ pub struct Report {
     pub unregistered_producers: Vec<String>,
     /// Tool invocations by `tool_kind`.
     pub tool_calls: BTreeMap<String, usize>,
-    /// Tool calls the adapter is structurally blind inside
-    /// (`bash`/`task`).
+    /// Tool calls that yield no filesystem evidence.
+    ///
+    /// Everything except `builtin`. `bash` and `task` are the
+    /// structurally blind ones the coverage-deficit rule keys on, but
+    /// `mcp` and `skill` produce no `fs.*` events either, and a
+    /// `tool.invoked` carrying no `tool_kind` at all has unknown
+    /// provenance. Counting any of those as observable — which this
+    /// did — credits the adapter for evidence it did not produce and
+    /// biases the headline ratio optimistic.
     pub blind_tool_calls: usize,
     /// Total tool calls.
     pub total_tool_calls: usize,
@@ -107,10 +114,10 @@ pub struct Report {
     pub unproven: usize,
     /// Artifacts recorded.
     pub artifacts: usize,
-    /// Tier-1 metric: fraction of dependency edges whose contributing
-    /// producers declared `partial` coverage for the kind that produced
-    /// them. `None` when there are no edges to divide by.
-    pub coverage_silence_rate: Option<f64>,
+    /// Computations that raised at least one obligation.
+    pub computations_with_obligations: usize,
+    /// Of those, how many had an fs-covering observer contribute.
+    pub computations_with_dischargeable_obligations: usize,
 }
 
 impl Report {
@@ -173,9 +180,6 @@ pub fn run(store_root: &Path) -> Result<Report, CoverageError> {
             .push(format!("{}/{}", key.producer, key.version));
     }
 
-    let mut partial_backed = 0usize;
-    let mut total_edges = 0usize;
-
     for node in graph.computations() {
         report.computations += 1;
         report.dependencies += node.dependencies.len();
@@ -203,19 +207,18 @@ pub fn run(store_root: &Path) -> Result<Report, CoverageError> {
                     report.unregistered_producers.push(name);
                 }
             }
-            if freshdag_engine::coverage::has_fs_covered_observer(&attribution.entries) {
-                report.obligations_dischargeable = true;
-            }
-            // Tier-1 "coverage silence rate": an edge is silence-backed
-            // when a contributing producer declared partial coverage for
-            // the kind that produces edges.
-            let fs_read_partial = attribution
-                .partial_notes
-                .get(EventKind::FsRead.as_wire_str())
-                .is_some_and(|notes| !notes.is_empty());
-            total_edges += node.dependencies.len();
-            if fs_read_partial {
-                partial_backed += node.dependencies.len();
+            // Per computation, exactly as the engine decides it. This
+            // used to OR a single global flag across every computation,
+            // so one computation with an observer made the whole store
+            // read "dischargeable" while `freshdag check` reported
+            // `coverage-deficit` on a different one — the report
+            // contradicting the tool on the same data, in the optimistic
+            // direction.
+            if !node.obligations.is_empty() {
+                report.computations_with_obligations += 1;
+                if freshdag_engine::coverage::has_fs_covered_observer(&attribution.entries) {
+                    report.computations_with_dischargeable_obligations += 1;
+                }
             }
         }
     }
@@ -231,18 +234,19 @@ pub fn run(store_root: &Path) -> Result<Report, CoverageError> {
             .payload
             .get("tool_kind")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("unknown");
+            .unwrap_or("<no tool_kind>");
         *report.tool_calls.entry(kind.to_string()).or_default() += 1;
         report.total_tool_calls += 1;
-        if matches!(kind, "bash" | "task") {
+        if kind != "builtin" {
             report.blind_tool_calls += 1;
         }
     }
 
-    report.coverage_silence_rate = (total_edges > 0).then(|| {
-        f64::from(u32::try_from(partial_backed).unwrap_or(u32::MAX))
-            / f64::from(u32::try_from(total_edges).unwrap_or(u32::MAX))
-    });
+    // Every computation that raised an obligation must be able to
+    // discharge it; anything less is not "dischargeable".
+    report.obligations_dischargeable = report.computations_with_obligations > 0
+        && report.computations_with_dischargeable_obligations
+            == report.computations_with_obligations;
 
     Ok(report)
 }
@@ -288,17 +292,20 @@ pub fn render(report: &Report) -> String {
         out.push_str("  no tool calls recorded\n");
     } else {
         for (kind, count) in &report.tool_calls {
-            let blind = if matches!(kind.as_str(), "bash" | "task") {
+            let blind = if kind == "builtin" {
+                ""
+            } else if matches!(kind.as_str(), "bash" | "task") {
                 "  <- blind inside"
             } else {
-                ""
+                "  <- no fs evidence"
             };
             let _ = writeln!(out, "  {kind:<16}  {count}{blind}");
         }
         if let Some(fraction) = report.observable_fraction() {
             let _ = writeln!(
                 out,
-                "\n  {} of {} tool calls were ones this adapter can see into ({:.0}%).",
+                "\n  {} of {} tool calls could yield filesystem evidence ({:.0}%). \
+                 Upper bound: not every one of them does.",
                 report.total_tool_calls - report.blind_tool_calls,
                 report.total_tool_calls,
                 fraction * 100.0
@@ -326,21 +333,51 @@ pub fn render(report: &Report) -> String {
     let _ = writeln!(out, "  raised            {}", report.obligations);
     let _ = writeln!(
         out,
+        "  raised by         {} of {} computations",
+        report.computations_with_obligations, report.computations
+    );
+    let _ = writeln!(
+        out,
         "  dischargeable     {}",
-        if report.obligations_dischargeable {
-            "yes — an fs-covering observer contributed to this computation"
+        if report.computations_with_obligations == 0 {
+            "n/a — no computation raised one".to_string()
+        } else if report.obligations_dischargeable {
+            "yes — every computation that raised one had an fs-covering observer".to_string()
         } else {
-            "NO — no Observer-role producer declares fs coverage here"
+            format!(
+                "NO — only {} of {} such computations had an fs-covering observer",
+                report.computations_with_dischargeable_obligations,
+                report.computations_with_obligations
+            )
         }
     );
 
-    out.push_str("\nTier-1 metrics (docs/EVALUATION.md §3)\n");
-    match report.coverage_silence_rate {
-        Some(rate) => {
-            let _ = writeln!(out, "  coverage silence rate      {:.0}%", rate * 100.0);
-        }
-        None => out.push_str("  coverage silence rate      n/a (no dependency edges)\n"),
-    }
+    out.push_str(&tier1_metrics());
+
+    out
+}
+
+/// The Tier-1 metric block.
+///
+/// Split out of [`render`] only to keep that function inside the
+/// project's line limit; it is a fixed block plus one computed line.
+fn tier1_metrics() -> String {
+    let mut out = String::new();
+    out.push_str("Tier-1 metrics (docs/EVALUATION.md §3)\n");
+    // Withdrawn rather than approximated. `EVALUATION.md §3` defines
+    // this as the fraction of dependency edges *backed by producers
+    // with partial coverage* — a property of each edge's own producer.
+    // The store does not attribute edges to producers, so an earlier
+    // version tested one flag per computation and attributed all of that
+    // computation's edges to it, which mis-reported in both directions
+    // (a probe-derived edge counted as backed by an `fs.read` partial
+    // note; an observer-derived edge counted as backed because the
+    // adapter also touched that computation). It read 100% on the first
+    // dogfood session by coincidence, not by method.
+    out.push_str(
+        "  coverage silence rate      not computable — needs per-edge producer \
+         attribution, which the store does not record\n",
+    );
     // Naming what cannot be computed, rather than approximating it. A
     // report that substitutes a computable number for an uncomputable
     // one is the same class of lie as reporting `unknown` as `valid`.
