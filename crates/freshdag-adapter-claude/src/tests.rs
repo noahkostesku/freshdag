@@ -650,6 +650,78 @@ fn an_exact_suppression_drops_the_glob_that_contains_it() {
     );
 }
 
+/// The fingerprint is what decides whether this adapter produces usable
+/// dependencies at all: `freshdag_store::graph` drops an `fs.read` with
+/// no hash as `NoFingerprint`, so before reads were fingerprinted every
+/// artifact came back `no-dependencies-observed`.
+#[test]
+fn a_production_compiler_fingerprints_the_file_a_read_is_about_to_read() {
+    use crate::content::DiskContent;
+
+    let dir = std::env::temp_dir().join("freshdag-read-fingerprint");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("input.txt");
+    std::fs::write(&file, b"payload\n").expect("write");
+
+    let mut compiler = Compiler::new(
+        AdapterConfig::new(),
+        FixedClock::conformance(),
+        SeededIdGen::conformance(),
+    )
+    .with_content(Box::new(DiskContent::default()));
+
+    let payload = serde_json::json!({
+        "session_id": "s",
+        "cwd": dir.display().to_string(),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": file.display().to_string()},
+    });
+    let events = compiler.compile_value(&payload);
+    let read = events
+        .iter()
+        .find(|e| e.kind == freshdag_core::ir::EventKind::FsRead)
+        .expect("a Read synthesizes fs.read");
+
+    assert_eq!(
+        read.payload["hash"].as_str(),
+        Some(format!("blake3:{}", blake3::hash(b"payload\n").to_hex()).as_str()),
+        "the fingerprint is of the bytes on disk"
+    );
+    assert_eq!(read.payload["size"].as_u64(), Some(8));
+    assert_eq!(read.payload["size_observed"].as_bool(), Some(true));
+}
+
+/// The conformance constructor must stay filesystem-free, or goldens
+/// would depend on the machine that ran them.
+#[test]
+fn the_default_compiler_reads_no_files() {
+    let dir = std::env::temp_dir().join("freshdag-read-fingerprint");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("input.txt");
+    std::fs::write(&file, b"payload\n").expect("write");
+
+    let mut compiler = compiler();
+    let payload = serde_json::json!({
+        "session_id": "s",
+        "cwd": dir.display().to_string(),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": file.display().to_string()},
+    });
+    let events = compiler.compile_value(&payload);
+    let read = events
+        .iter()
+        .find(|e| e.kind == freshdag_core::ir::EventKind::FsRead)
+        .expect("a Read synthesizes fs.read");
+
+    assert!(
+        read.payload["hash"].is_null(),
+        "the default content source must not touch the filesystem"
+    );
+    assert_eq!(read.payload["size_observed"].as_bool(), Some(false));
+}
+
 #[test]
 fn coverage_json_declares_the_adapter_role() {
     // PENDING PHASE A: `CoverageManifest` gains a required

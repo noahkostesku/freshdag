@@ -40,6 +40,10 @@ pub struct AdapterConfig {
     /// User-supplied coverage override: event kinds to withhold.
     /// `diagnostic` is never suppressible.
     pub suppressed_kinds: Vec<EventKindPattern>,
+    /// Largest file this adapter will hash inline to fingerprint an
+    /// `fs.read`. Above it the read is emitted without a fingerprint
+    /// rather than stalling the tool call.
+    pub max_hash_bytes: u64,
 }
 
 impl AdapterConfig {
@@ -51,6 +55,7 @@ impl AdapterConfig {
             producer_version: env!("CARGO_PKG_VERSION").to_string(),
             identity_rule_version: crate::identity::SESSION_AS_COMPUTATION_V1.to_string(),
             suppressed_kinds: Vec::new(),
+            max_hash_bytes: crate::content::DEFAULT_MAX_HASH_BYTES,
         }
     }
 

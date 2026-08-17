@@ -21,6 +21,7 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::config::{AdapterConfig, AGENT_KIND, PRODUCER, UNKNOWN_SESSION_ID};
+use crate::content::{ContentSource, DiskContent, NoContent};
 use crate::determinism::{Clock, IdGen, SystemClock, UuidV7Gen};
 use crate::diagnostic::{payload_keys, Diagnostic, DiagnosticCode};
 use crate::hook::{self, HookEvent};
@@ -50,20 +51,41 @@ pub struct Compiler<C: Clock, G: IdGen> {
     config: AdapterConfig,
     clock: C,
     ids: G,
+    /// Where `fs.read` fingerprints come from. Defaults to
+    /// [`NoContent`], so the compile path stays filesystem-free unless
+    /// a caller deliberately installs a reader.
+    content: Box<dyn ContentSource>,
 }
 
 impl Compiler<SystemClock, UuidV7Gen> {
     /// The production wiring: real wall clock, real `UUIDv7`s.
     #[must_use]
     pub fn production(config: AdapterConfig) -> Self {
-        Self::new(config, SystemClock, UuidV7Gen)
+        let max = config.max_hash_bytes;
+        Self::new(config, SystemClock, UuidV7Gen).with_content(Box::new(DiskContent::new(max)))
     }
 }
 
 impl<C: Clock, G: IdGen> Compiler<C, G> {
     /// Construct with explicit time and identity sources.
     pub fn new(config: AdapterConfig, clock: C, ids: G) -> Self {
-        Self { config, clock, ids }
+        Self {
+            config,
+            clock,
+            ids,
+            content: Box::new(NoContent),
+        }
+    }
+
+    /// Install a fingerprint source for `fs.read`.
+    ///
+    /// Deliberately not the default: the conformance harness builds its
+    /// compiler with [`Compiler::new`], and a golden that depended on
+    /// files present on the running machine would be nondeterministic.
+    #[must_use]
+    pub fn with_content(mut self, content: Box<dyn ContentSource>) -> Self {
+        self.content = content;
+        self
     }
 
     /// The configuration in force.
@@ -219,7 +241,12 @@ impl<C: Clock, G: IdGen> Compiler<C, G> {
 
         // Filesystem synthesis keys off the RUNTIME tool name, not the
         // normalized one: `mcp/.../read` is not Claude Code's `Read`.
-        let (fs_payload, fs_diags) = synthesize_fs(raw_tool_name, &tool_input, ctx.cwd.as_deref());
+        let (fs_payload, fs_diags) = synthesize_fs(
+            raw_tool_name,
+            &tool_input,
+            ctx.cwd.as_deref(),
+            self.content.as_ref(),
+        );
         pending.extend(fs_diags);
         if let Some((kind, payload_value)) = fs_payload {
             out.push(self.event(ctx, kind, payload_value, Some(invoked_id)));
@@ -564,6 +591,7 @@ fn synthesize_fs(
     raw_tool_name: &str,
     tool_input: &Value,
     cwd: Option<&Path>,
+    content: &dyn ContentSource,
 ) -> (Option<(EventKind, Value)>, Vec<Diagnostic>) {
     let is_read = hook::READ_TOOLS.contains(&raw_tool_name);
     let is_write = hook::WRITE_TOOLS.contains(&raw_tool_name);
@@ -600,27 +628,40 @@ fn synthesize_fs(
     };
 
     if is_read {
-        (Some(synthesize_read(&resolved)), Vec::new())
+        (Some(synthesize_read(&resolved, content)), Vec::new())
     } else {
         let (event, diags) = synthesize_write(raw_tool_name, tool_input, &resolved);
         (Some(event), diags)
     }
 }
 
-fn synthesize_read(resolved: &paths::ResolvedPath) -> (EventKind, Value) {
+fn synthesize_read(
+    resolved: &paths::ResolvedPath,
+    content: &dyn ContentSource,
+) -> (EventKind, Value) {
+    // The hook payload carries only a path, so the fingerprint comes
+    // from the injected content source — `None` under the conformance
+    // harness, the real file in production. A read with no fingerprint
+    // is dropped by the store as `NoFingerprint`, so this is what
+    // decides whether the adapter produces usable dependencies at all.
+    let fingerprint = content.fingerprint(&resolved.path);
+    let (size, hash) = match fingerprint {
+        Some((hash, size)) => (size, Some(hash)),
+        None => (0, None),
+    };
+    let observed = hash.is_some();
+
     let read = FsRead {
         path: resolved.path.clone(),
-        // Not observable before the read happens, and the compile path
-        // does not touch the filesystem. `size_observed: false` marks it.
-        size: 0,
-        hash: None,
+        size,
+        hash,
         follow_symlink_target: None,
         raw_path: resolved.raw_path.clone(),
         read_kind: freshdag_core::ir::FsReadKind::Direct,
         impure: false,
     };
     let mut value = to_payload(&read);
-    insert(&mut value, "size_observed", json!(false));
+    insert(&mut value, "size_observed", json!(observed));
     insert(
         &mut value,
         "observation",
