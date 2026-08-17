@@ -521,12 +521,15 @@ fn classify_tool(raw: &str, tool_input: &Value) -> ClassifiedTool {
             tool_kind: ToolKind::Bash,
             diagnostics: Vec::new(),
         },
-        hook::TASK_TOOL_NAME => ClassifiedTool {
+        hook::SKILL_TOOL_NAME => classify_skill(raw, tool_input),
+        // Normalized to "task" whatever the runtime called it, so the
+        // store's obligation rule and the certificate contract keep a
+        // single spelling to key on.
+        name if hook::TASK_TOOL_NAMES.contains(&name) => ClassifiedTool {
             tool_name: "task".to_string(),
             tool_kind: ToolKind::Task,
             diagnostics: Vec::new(),
         },
-        hook::SKILL_TOOL_NAME => classify_skill(raw, tool_input),
         other => ClassifiedTool {
             tool_name: other.to_string(),
             tool_kind: ToolKind::Builtin,

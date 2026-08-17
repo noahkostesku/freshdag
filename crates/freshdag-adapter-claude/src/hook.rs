@@ -116,8 +116,22 @@ pub const SKILL_TOOL_NAME: &str = "Skill";
 /// The Claude Code tool name for a shell subprocess.
 pub const BASH_TOOL_NAME: &str = "Bash";
 
-/// The Claude Code tool name for a subagent delegation.
-pub const TASK_TOOL_NAME: &str = "Task";
+/// Tool names Claude Code uses for a subagent delegation.
+///
+/// **Both spellings are load-bearing.** This runtime emits `Agent`;
+/// earlier revisions of the tool were named `Task`, and the name is not
+/// contractual. Recognizing only one is not a cosmetic miss: a
+/// delegation classified as [`ToolKind::Builtin`] raises no
+/// `bash`/`task` observation obligation in the store, so
+/// `Certificate::check_coverage_deficit` never learns that a subagent —
+/// which can read and write anything, invisibly to this adapter — ran
+/// at all. A verifier found `Agent` unhandled and reproduced an
+/// artifact reaching `valid` after an unobserved delegation.
+///
+/// A name not in this list falls to `Builtin` and re-opens that hole,
+/// which is why `unknown_delegation_spellings_are_not_silently_builtin`
+/// exists.
+pub const TASK_TOOL_NAMES: [&str; 2] = ["Task", "Agent"];
 
 /// Tool-input keys that name a file the tool reads.
 pub const READ_TOOLS: [&str; 1] = ["Read"];
